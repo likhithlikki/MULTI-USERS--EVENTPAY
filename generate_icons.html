@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Icon Generator — EventPay</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Segoe UI', sans-serif;
+  background: #0b0f1a; color: #f1f5f9;
+  padding: 24px; min-height: 100vh;
+}
+h1 { font-size: 22px; font-weight: 800; margin-bottom: 6px;
+  background: linear-gradient(135deg,#6366f1,#8b5cf6);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+p { color: #94a3b8; font-size: 14px; margin-bottom: 24px; }
+.controls {
+  background: #111827; border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 16px; padding: 20px; margin-bottom: 24px;
+}
+.controls label { display: block; font-size: 12px; font-weight: 600; color: #94a3b8;
+  text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 8px; }
+.controls input[type="text"],
+.controls input[type="color"] {
+  padding: 10px 14px; background: #0b0f1a; border: 1.5px solid rgba(255,255,255,0.1);
+  border-radius: 10px; color: #f1f5f9; font-size: 14px; margin-bottom: 16px;
+  width: 100%;
+}
+.controls input[type="color"] { height: 48px; cursor: pointer; }
+.gen-btn {
+  width: 100%; padding: 14px; background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: white; border: none; border-radius: 12px; font-size: 16px;
+  font-weight: 700; cursor: pointer; transition: all 0.2s;
+}
+.gen-btn:hover { transform: translateY(-2px); }
+.preview-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 14px; margin-bottom: 24px;
+}
+.preview-item {
+  background: #111827; border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 14px; padding: 14px; text-align: center;
+}
+.preview-item canvas { border-radius: 22%; margin-bottom: 8px; }
+.preview-item .size-label { font-size: 11px; color: #64748b; margin-bottom: 6px; }
+.preview-item .dl-btn {
+  padding: 5px 12px; background: rgba(99,102,241,0.15);
+  color: #818cf8; border: 1px solid rgba(99,102,241,0.3);
+  border-radius: 8px; font-size: 11px; font-weight: 600;
+  cursor: pointer; width: 100%; transition: all 0.2s;
+}
+.preview-item .dl-btn:hover { background: rgba(99,102,241,0.25); }
+.dl-all {
+  width: 100%; padding: 14px; background: #10b981;
+  color: white; border: none; border-radius: 12px;
+  font-size: 15px; font-weight: 700; cursor: pointer;
+  margin-bottom: 24px; transition: all 0.2s; display: none;
+}
+.dl-all:hover { transform: translateY(-2px); }
+.instructions {
+  background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.2);
+  border-radius: 14px; padding: 20px;
+}
+.instructions h3 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: #818cf8; }
+.instructions ol { padding-left: 20px; }
+.instructions li { font-size: 13px; color: #94a3b8; margin-bottom: 8px; line-height: 1.6; }
+.instructions code {
+  background: rgba(255,255,255,0.08); padding: 2px 7px;
+  border-radius: 5px; font-family: monospace; font-size: 12px; color: #c4b5fd;
+}
+</style>
+</head>
+<body>
+
+<h1>🎨 EventPay Icon Generator</h1>
+<p>Generate all required app icons right here in your browser. No external tools needed.</p>
+
+<div class="controls">
+  <label>Event Short Name (shown on icon)</label>
+  <input type="text" id="appName" value="EP" maxlength="3" placeholder="EP">
+
+  <label>Background Color</label>
+  <input type="color" id="bgColor" value="#6366f1">
+
+  <label>Text Color</label>
+  <input type="color" id="textColor" value="#ffffff">
+
+  <button class="gen-btn" onclick="generateAll()">⚡ Generate All Icons</button>
+</div>
+
+<div class="preview-grid" id="previewGrid"></div>
+<button class="dl-all" id="dlAll" onclick="downloadAll()">⬇️ Download All Icons as ZIP (manual)</button>
+
+<div class="instructions">
+  <h3>📋 How to use these icons:</h3>
+  <ol>
+    <li>Click <strong>"Generate All Icons"</strong> above</li>
+    <li>Click <strong>"Download"</strong> for each icon size individually</li>
+    <li>In your <code>EventPay</code> folder, create a new folder called <code>icons</code></li>
+    <li>Save each downloaded file into that <code>icons</code> folder with the exact name shown (e.g. <code>icon-192.png</code>)</li>
+    <li>That's it! Your app will use these icons when installed</li>
+  </ol>
+</div>
+
+<script>
+const SIZES = [72, 96, 128, 144, 152, 192, 384, 512];
+
+function generateAll() {
+  const name     = document.getElementById("appName").value.trim() || "EP";
+  const bgColor  = document.getElementById("bgColor").value;
+  const txtColor = document.getElementById("textColor").value;
+  const grid     = document.getElementById("previewGrid");
+  grid.innerHTML = "";
+
+  SIZES.forEach(size => {
+    const canvas = document.createElement("canvas");
+    canvas.width  = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d");
+
+    // Background gradient
+    const grad = ctx.createLinearGradient(0, 0, size, size);
+    grad.addColorStop(0, bgColor);
+    grad.addColorStop(1, adjustColor(bgColor, -30));
+    ctx.fillStyle = grad;
+    const r = size * 0.22;
+    roundRect(ctx, 0, 0, size, size, r);
+    ctx.fill();
+
+    // Decorative circle
+    ctx.beginPath();
+    ctx.arc(size * 0.75, size * 0.25, size * 0.35, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,255,255,0.07)";
+    ctx.fill();
+
+    // Text
+    ctx.fillStyle = txtColor;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const fontSize = size > 128 ? size * 0.32 : size * 0.36;
+    ctx.font = `800 ${fontSize}px 'Segoe UI', Arial, sans-serif`;
+    ctx.fillText(name.toUpperCase(), size / 2, size / 2);
+
+    // Small subtitle
+    if (size >= 192) {
+      ctx.font = `600 ${size * 0.1}px 'Segoe UI', Arial, sans-serif`;
+      ctx.fillStyle = "rgba(255,255,255,0.6)";
+      ctx.fillText("PAY", size / 2, size * 0.72);
+    }
+
+    // Display
+    const displaySize = Math.min(size, 80);
+    const displayCanvas = document.createElement("canvas");
+    displayCanvas.width  = displaySize;
+    displayCanvas.height = displaySize;
+    const dCtx = displayCanvas.getContext("2d");
+    dCtx.drawImage(canvas, 0, 0, displaySize, displaySize);
+
+    const item = document.createElement("div");
+    item.className = "preview-item";
+    item.innerHTML = `<div class="size-label">${size}×${size}</div>`;
+    item.insertBefore(displayCanvas, item.firstChild);
+    const dlBtn = document.createElement("button");
+    dlBtn.className = "dl-btn";
+    dlBtn.textContent = "⬇ Download";
+    dlBtn.onclick = () => {
+      const a = document.createElement("a");
+      a.download = `icon-${size}.png`;
+      a.href = canvas.toDataURL("image/png");
+      a.click();
+    };
+    item.appendChild(dlBtn);
+    grid.appendChild(item);
+  });
+
+  document.getElementById("dlAll").style.display = "block";
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function adjustColor(hex, amount) {
+  const num = parseInt(hex.replace("#",""), 16);
+  const r = Math.max(0, Math.min(255, (num >> 16) + amount));
+  const g = Math.max(0, Math.min(255, ((num >> 8) & 0x00FF) + amount));
+  const b = Math.max(0, Math.min(255, (num & 0x0000FF) + amount));
+  return "#" + ((r << 16) | (g << 8) | b).toString(16).padStart(6, "0");
+}
+
+function downloadAll() {
+  alert("Click 'Download' on each icon individually to save them.\nSave all to your EventPay/icons/ folder.");
+}
+
+// Auto-generate on load
+window.onload = () => generateAll();
+</script>
+</body>
+</html>

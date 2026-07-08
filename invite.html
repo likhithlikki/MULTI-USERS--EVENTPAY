@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script>(function(){ const t=localStorage.getItem('theme')||'dark'; document.documentElement.setAttribute('data-theme',t); })();</script>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#6366f1">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Invitation</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<link rel="stylesheet" href="shared.css">
+<style>
+/* INVITE CARD */
+.invite-card {
+  max-width: 480px; margin: 0 auto;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 24px; overflow: hidden;
+  box-shadow: var(--card-shadow);
+  animation: fadeInUp 0.5s ease both;
+}
+.invite-header {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  padding: 40px 28px 32px; text-align: center; position: relative;
+}
+.invite-header::after {
+  content: ''; position: absolute; bottom: -1px; left: 0; right: 0;
+  height: 30px;
+  background: url("data:image/svg+xml,%3Csvg viewBox='0 0 1440 30' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 30h1440V0c-240 24-480 30-720 30S240 24 0 0v30z' fill='var(--bg)'/%3E%3C/svg%3E");
+  background-size: cover;
+}
+.invite-emoji { font-size: 44px; margin-bottom: 12px; }
+.invite-label { font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.7); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 8px; }
+.invite-event-name { font-size: clamp(22px,5vw,32px); font-weight: 800; color: #fff; line-height: 1.2; text-shadow: 0 2px 10px rgba(0,0,0,0.3); }
+.invite-subtitle { font-size: 14px; color: rgba(255,255,255,0.8); margin-top: 6px; }
+
+/* INVITE BODY */
+.invite-body { padding: 28px 24px 20px; }
+.invite-detail {
+  display: flex; align-items: flex-start; gap: 14px;
+  padding: 14px; background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 14px; margin-bottom: 10px;
+}
+.invite-detail-icon { font-size: 22px; flex-shrink: 0; margin-top: 2px; }
+.invite-detail-content { flex: 1; }
+.invite-detail-label { font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 4px; }
+.invite-detail-value { font-size: 15px; font-weight: 700; color: var(--text); line-height: 1.4; }
+
+/* INVITATION CARD IMAGE */
+.invite-card-image {
+  max-width: 480px; margin: 0 auto 16px;
+  border-radius: 16px; overflow: hidden;
+  border: 1px solid var(--border); box-shadow: var(--card-shadow);
+}
+.invite-card-image img { width: 100%; display: block; }
+.invite-card-image iframe { width: 100%; height: 300px; border: none; display: block; }
+
+/* MAP */
+.map-card {
+  max-width: 480px; margin: 0 auto 16px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; overflow: hidden; box-shadow: var(--card-shadow);
+}
+.map-embed { width: 100%; height: 220px; border: none; display: block; }
+.map-footer { padding: 14px 18px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.map-address { flex: 1; font-size: 13px; color: var(--text-muted); line-height: 1.4; min-width: 0; }
+.map-open-btn {
+  display: flex; align-items: center; gap: 6px; padding: 10px 16px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: white; border: none; border-radius: 10px; cursor: pointer;
+  font-family: 'Sora', sans-serif; font-size: 13px; font-weight: 700;
+  white-space: nowrap; text-decoration: none; transition: all 0.2s; flex-shrink: 0;
+}
+.map-open-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px var(--accent-glow); }
+
+/* QR CODE */
+.qr-card {
+  max-width: 480px; margin: 0 auto 16px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; padding: 20px; text-align: center;
+  box-shadow: var(--card-shadow);
+}
+.qr-card h3 { font-size: 14px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 14px; }
+.qr-wrap { display: inline-block; padding: 12px; background: white; border-radius: 12px; }
+.qr-hint { font-size: 12px; color: var(--text-dim); margin-top: 10px; }
+
+/* SHARE BUTTONS */
+.share-row { max-width: 480px; margin: 0 auto 16px; display: flex; gap: 8px; flex-wrap: wrap; }
+.share-btn {
+  flex: 1; min-width: 100px; padding: 11px 14px; border-radius: 12px;
+  border: 1.5px solid var(--border2); background: var(--surface);
+  color: var(--text); font-family: 'Sora', sans-serif; font-size: 13px; font-weight: 700;
+  cursor: pointer; transition: all 0.2s; text-align: center;
+}
+.share-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(99,102,241,0.08); transform: translateY(-2px); }
+
+/* DISABLED */
+.disabled-page { text-align: center; padding: 80px 20px; }
+
+/* LOADING SKELETON */
+.skeleton-card { max-width:480px; margin:24px auto; background:var(--surface); border:1px solid var(--border); border-radius:24px; padding:28px; }
+.sk { height:20px; border-radius:8px; margin-bottom:14px; background:linear-gradient(90deg,var(--surface) 25%,var(--surface2) 50%,var(--surface) 75%); background-size:200% 100%; animation:shimmer 1.5s infinite; }
+@keyframes shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
+</style>
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="nav-logo" id="navEventName">EventPay</div>
+  <div class="nav-links">
+    <a href="index.html" class="nav-link">Home</a>
+    <a href="invite.html" class="nav-link active">Invitation</a>
+    <a href="status.html" class="nav-link">Status</a>
+    <a href="complaint.html" class="nav-link">Complaint</a>
+    <button class="theme-toggle-btn" id="themeToggle" onclick="toggleTheme()">☀️ Light</button>
+  </div>
+  <button class="hamburger" onclick="toggleNav()">☰</button>
+</nav>
+<div class="nav-mobile" id="navMobile">
+  <a href="index.html">🏠 Home</a>
+  <a href="invite.html">💌 Invitation</a>
+  <a href="gallery.html">📸 Gallery</a>
+  <a href="donors.html">👥 Donors</a>
+  <a href="status.html">🔍 Status</a>
+  <a href="complaint.html">📋 Complaint</a>
+</div>
+
+<!-- DISABLED STATE -->
+<div id="disabledPage" class="page-content" style="display:none">
+  <div class="disabled-page">
+    <div style="font-size:64px;margin-bottom:20px">🔒</div>
+    <h2 style="font-size:22px;font-weight:800;margin-bottom:10px;color:var(--text-muted)">Not Available</h2>
+    <p style="color:var(--text-dim);font-size:14px">The invitation is not available yet. Please check back later.</p>
+    <a href="index.html" class="btn-primary" style="display:inline-flex;text-decoration:none;margin-top:24px">← Back to Home</a>
+  </div>
+</div>
+
+<!-- SKELETON LOADING -->
+<div id="loadingSkeleton" class="page-content">
+  <div class="skeleton-card">
+    <div class="sk" style="height:30px;width:60%;margin:0 auto 20px"></div>
+    <div class="sk" style="height:16px;width:80%;margin:0 auto 10px"></div>
+    <div class="sk" style="height:16px;width:70%;margin:0 auto 20px"></div>
+    <div class="sk" style="height:60px"></div>
+    <div class="sk" style="height:60px"></div>
+    <div class="sk" style="height:200px;margin-top:10px"></div>
+  </div>
+</div>
+
+<!-- MAIN CONTENT -->
+<div id="mainContent" style="display:none">
+  <!-- INVITATION CARD IMAGE (from Settings InviteCardURL) -->
+  <div class="page-content" style="padding-top:24px">
+
+    <div class="invite-card" id="inviteCard">
+      <div class="invite-header">
+        <div class="invite-emoji">💍</div>
+        <div class="invite-label">You are cordially invited to</div>
+        <div class="invite-event-name" id="inviteEventName">Event Name</div>
+        <div class="invite-subtitle" id="inviteSubtitle">Join us for this special occasion</div>
+      </div>
+      <div class="invite-body">
+        <div class="invite-detail" id="inviteDateRow" style="display:none">
+          <div class="invite-detail-icon">📅</div>
+          <div class="invite-detail-content">
+            <div class="invite-detail-label">Date & Time</div>
+            <div class="invite-detail-value" id="inviteDateTime">—</div>
+          </div>
+        </div>
+        <div class="invite-detail" id="inviteVenueRow" style="display:none">
+          <div class="invite-detail-icon">📍</div>
+          <div class="invite-detail-content">
+            <div class="invite-detail-label">Venue</div>
+            <div class="invite-detail-value" id="inviteVenue">—</div>
+          </div>
+        </div>
+        <div class="invite-detail">
+          <div class="invite-detail-icon">💰</div>
+          <div class="invite-detail-content">
+            <div class="invite-detail-label">Contribute Online</div>
+            <div class="invite-detail-value" style="font-size:13px;color:var(--text-muted)">Scan QR code below or tap "Pay Now"</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- INVITE CARD IMAGE (from InviteCardURL setting) -->
+    <div class="invite-card-image" id="inviteImageCard" style="display:none">
+      <img id="inviteImage" src="" alt="Invitation Card" loading="lazy"
+           onerror="this.parentElement.style.display='none'"
+           style="cursor:pointer" onclick="openInviteImage()">
+      <div style="text-align:center;padding:10px;background:var(--surface2);font-size:11px;color:var(--text-dim)">
+        Tap to view full invitation card
+      </div>
+    </div>
+
+    <!-- PDF INVITE CARD -->
+    <div class="invite-card-image" id="invitePDFCard" style="display:none">
+      <iframe id="invitePDF" src="" title="Invitation Card"></iframe>
+      <div style="text-align:center;padding:10px;background:var(--surface2)">
+        <a class="text-link" id="invitePDFLink" href="" target="_blank" style="font-size:13px">📥 Download Invitation Card</a>
+      </div>
+    </div>
+
+    <!-- VENUE MAP -->
+    <div class="map-card" id="mapCard" style="display:none">
+      <iframe id="mapEmbed" class="map-embed" allowfullscreen loading="lazy"
+              referrerpolicy="no-referrer-when-downgrade" src=""></iframe>
+      <div class="map-footer">
+        <div class="map-address" id="mapAddress"></div>
+        <a class="map-open-btn" id="mapOpenBtn" href="" target="_blank" rel="noopener">
+          🗺️ Open Maps
+        </a>
+      </div>
+    </div>
+
+    <!-- QR CODE TO APP -->
+    <div class="qr-card">
+      <h3>📲 Contribute Online</h3>
+      <div class="qr-wrap"><div id="qrcode"></div></div>
+      <div class="qr-hint">Scan to open the contribution page</div>
+    </div>
+
+    <!-- SHARE BUTTONS -->
+    <div class="share-row">
+      <button class="share-btn" onclick="shareWhatsApp()">📱 WhatsApp</button>
+      <button class="share-btn" onclick="copyLink()">🔗 Copy Link</button>
+      <button class="share-btn" onclick="nativeShare()">📤 Share</button>
+    </div>
+
+    <div style="text-align:center;margin-top:8px">
+      <a href="index.html" class="btn-primary" style="display:inline-flex;text-decoration:none">💰 Make a Contribution</a>
+    </div>
+  </div>
+</div>
+
+<footer class="footer"><p>With love & blessings 🙏</p></footer>
+<div class="toast-container" id="toastContainer"></div>
+
+<script src="config.js"></script>
+<script>
+const pageURL = window.location.origin + window.location.pathname.replace('invite.html','index.html');
+
+Promise.all([
+  fetch(APP_CONFIG.SCRIPT_URL+"?action=getSettings").then(r=>r.json()).catch(()=>({})),
+  fetch(APP_CONFIG.SCRIPT_URL+"?action=getPublicVisibility").then(r=>r.json()).catch(()=>({showInviteCard:true}))
+]).then(([s, vis])=>{
+  document.getElementById("loadingSkeleton").style.display="none";
+
+  // VISIBILITY CHECK
+  if(vis.showInviteCard===false){
+    document.getElementById("disabledPage").style.display="block"; return;
+  }
+
+  document.getElementById("mainContent").style.display="block";
+
+  const eventName=s.EventName||APP_CONFIG.EVENT_NAME||"Event";
+  const eventDate=s.EventDate||""; const eventTime=s.EventTime||"";
+  const venueAddr=s.VenueAddress||""; const venueMap=s.VenueMapLink||"";
+  const inviteURL=s.InviteCardURL||""; const orgName=APP_CONFIG.ORG_NAME||"";
+
+  // Update nav + title
+  document.getElementById("navEventName").textContent=eventName;
+  document.title="Invitation — "+eventName;
+
+  // Invite card
+  document.getElementById("inviteEventName").textContent=eventName;
+  if(orgName) document.getElementById("inviteSubtitle").textContent="Hosted by "+orgName;
+
+  // Date + time
+  // Date + Time Formatting
+if (eventDate || eventTime) {
+  document.getElementById("inviteDateRow").style.display = "flex";
+
+  let formattedDate = "";
+  let formattedTime = "";
+
+  if (eventDate) {
+    const d = new Date(eventDate);
+    formattedDate = d.toLocaleDateString("en-IN", {
+      day: "numeric",
+      month: "long",
+      year: "numeric"
+    });
+  }
+
+  if (eventTime) {
+    const t = new Date(eventTime);
+    formattedTime = t.toLocaleTimeString("en-IN", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true
+    });
+  }
+
+  document.getElementById("inviteDateTime").textContent =
+    `${formattedDate}${formattedTime ? " at " + formattedTime : ""}`;
+}
+  // Venue
+  if(venueAddr){
+    document.getElementById("inviteVenueRow").style.display="flex";
+    document.getElementById("inviteVenue").textContent=venueAddr;
+  }
+
+  // Invitation Card Image / PDF
+  if(inviteURL){
+    if(inviteURL.toLowerCase().includes(".pdf")||inviteURL.includes("pdf")){
+      document.getElementById("invitePDFCard").style.display="block";
+      document.getElementById("invitePDF").src=inviteURL;
+      document.getElementById("invitePDFLink").href=inviteURL;
+    } else {
+      document.getElementById("inviteImageCard").style.display="block";
+      document.getElementById("inviteImage").src=inviteURL;
+    }
+  }
+
+  // Map embed
+  if(venueMap){
+    document.getElementById("mapCard").style.display="block";
+    document.getElementById("mapAddress").textContent=venueAddr||"View venue location";
+    document.getElementById("mapOpenBtn").href=venueMap;
+    // Google Maps embed URL
+    let embedSrc=venueMap;
+    if(venueMap.includes("maps.google.com")&&!venueMap.includes("/embed")){
+      const q=venueAddr||venueMap;
+      embedSrc="https://maps.google.com/maps?q="+encodeURIComponent(q)+"&output=embed";
+    }
+    document.getElementById("mapEmbed").src=embedSrc;
+  }
+
+  // QR Code
+  new QRCode(document.getElementById("qrcode"),{text:pageURL,width:160,height:160});
+}).catch(e=>{
+  document.getElementById("loadingSkeleton").style.display="none";
+  document.getElementById("mainContent").style.display="block";
+});
+
+function openInviteImage(){
+  const src=document.getElementById("inviteImage").src;
+  if(src) window.open(src,"_blank");
+}
+
+function shareWhatsApp(){
+  const msg="🎉 You are invited!\n\n"+document.getElementById("inviteEventName").textContent+"\n\n📍 "+
+    (document.getElementById("inviteVenue").textContent||"")+"\n\n💰 Contribute online: "+pageURL;
+  window.open("https://wa.me/?text="+encodeURIComponent(msg),"_blank");
+}
+function copyLink(){
+  navigator.clipboard.writeText(pageURL).then(()=>toast("Link copied!","success")).catch(()=>{
+    const ta=document.createElement("textarea"); ta.value=pageURL; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); toast("Link copied!","success");
+  });
+}
+function nativeShare(){
+  if(navigator.share){
+    navigator.share({title:document.getElementById("inviteEventName").textContent,url:pageURL}).catch(()=>{});
+  } else copyLink();
+}
+
+function toggleNav(){document.getElementById("navMobile").classList.toggle("open");}
+function toggleTheme(){
+  const c=document.documentElement.getAttribute('data-theme')||'dark', n=c==='dark'?'light':'dark';
+  document.documentElement.setAttribute('data-theme',n); localStorage.setItem('theme',n);
+  document.getElementById('themeToggle').textContent=n==='dark'?'☀️ Light':'🌙 Dark';
+}
+window.addEventListener('DOMContentLoaded',()=>{
+  const t=document.documentElement.getAttribute('data-theme')||'dark';
+  document.getElementById('themeToggle').textContent=t==='dark'?'☀️ Light':'🌙 Dark';
+});
+function toast(msg,type="info"){
+  const tc=document.getElementById("toastContainer"); const t=document.createElement("div");
+  t.className="toast "+type; t.textContent=msg; tc.appendChild(t);
+  setTimeout(()=>{t.classList.add("fade-out");setTimeout(()=>t.remove(),300);},2500);
+}
+</script>
+<script>if("serviceWorker"in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));</script>
+</body>
+</html>

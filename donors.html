@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script>(function(){ const t=localStorage.getItem('theme')||'dark'; document.documentElement.setAttribute('data-theme',t); })();</script>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#6366f1">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Donor List</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared.css">
+<style>
+.page-hero { background:linear-gradient(135deg,#1e1b4b,#312e81); padding:38px 20px; text-align:center; border-bottom:1px solid var(--border); }
+[data-theme="light"] .page-hero { background:linear-gradient(135deg,#4f46e5,#7c3aed); }
+.page-hero h1 { font-size:clamp(20px,4vw,30px); font-weight:800; color:#fff; margin-bottom:6px; }
+.page-hero p  { color:rgba(255,255,255,0.78); font-size:13px; }
+
+/* STATS */
+.stats-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; max-width:520px; margin:0 auto 24px; }
+.stat-mini { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:16px 12px; text-align:center; box-shadow:var(--card-shadow); }
+.stat-mini .sv { font-family:'JetBrains Mono',monospace; font-size:18px; font-weight:700; color:var(--accent); }
+.stat-mini .sl { font-size:10px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-top:5px; }
+
+/* CONTROLS */
+.list-controls { max-width:520px; margin:0 auto 14px; display:flex; gap:8px; flex-wrap:wrap; }
+.list-controls input, .list-controls select {
+  padding:9px 13px; background:var(--surface); border:1.5px solid var(--border);
+  border-radius:10px; color:var(--text); font-family:'Sora',sans-serif; font-size:13px; transition:all 0.2s;
+}
+.list-controls input { flex:1; min-width:140px; }
+.list-controls input:focus, .list-controls select:focus { outline:none; border-color:var(--accent); }
+.list-controls select { cursor:pointer; }
+
+/* PRIVACY NOTE */
+.privacy-note {
+  max-width:520px; margin:12px auto 18px;
+  padding:10px 14px; background:rgba(59,130,246,0.08);
+  border:1px solid rgba(59,130,246,0.2); border-radius:10px;
+  font-size:11px; color:var(--text-muted); text-align:center;
+}
+
+/* DONOR LIST */
+.donor-list { max-width:520px; margin:0 auto; }
+.donor-item {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:14px; padding:14px 16px;
+  display:flex; align-items:center; gap:12px;
+  margin-bottom:8px; transition:all 0.2s; box-shadow:var(--card-shadow);
+  animation:fadeInUp 0.3s ease both;
+}
+.donor-item:hover { border-color:var(--border2); transform:translateY(-1px); }
+.donor-rank {
+  width:36px; height:36px; border-radius:10px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  font-size:14px; font-weight:800;
+}
+.rank-1 { background:linear-gradient(135deg,#f59e0b,#d97706); color:white; }
+.rank-2 { background:linear-gradient(135deg,#9ca3af,#6b7280); color:white; }
+.rank-3 { background:linear-gradient(135deg,#b45309,#92400e); color:white; }
+.rank-other { background:var(--surface2); color:var(--text-muted); font-size:12px; }
+.donor-info { flex:1; min-width:0; }
+.donor-name { font-size:14px; font-weight:700; margin-bottom:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.donor-date { font-size:11px; color:var(--text-dim); }
+.donor-amount { font-family:'JetBrains Mono',monospace; font-size:16px; font-weight:700; color:var(--accent); white-space:nowrap; }
+
+/* DISABLED PAGE */
+.disabled-page { text-align:center; padding:80px 20px; }
+.disabled-page .icon { font-size:64px; margin-bottom:20px; }
+.disabled-page h2 { font-size:22px; font-weight:800; margin-bottom:10px; color:var(--text-muted); }
+.disabled-page p  { color:var(--text-dim); font-size:14px; }
+</style>
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="nav-logo" id="navEventName">EventPay</div>
+  <div class="nav-links">
+    <a href="index.html" class="nav-link">Home</a>
+    <a href="donors.html" class="nav-link active">Donors</a>
+    <a href="status.html" class="nav-link">Status</a>
+    <a href="complaint.html" class="nav-link">Complaint</a>
+    <button class="theme-toggle-btn" id="themeToggle" onclick="toggleTheme()">☀️ Light</button>
+  </div>
+  <button class="hamburger" onclick="toggleNav()">☰</button>
+</nav>
+<div class="nav-mobile" id="navMobile">
+  <a href="index.html">🏠 Home</a>
+  <a href="donors.html">👥 Donors</a>
+  <a href="status.html">🔍 Status</a>
+  <a href="invite.html">💌 Invitation</a>
+  <a href="gallery.html">📸 Gallery</a>
+  <a href="complaint.html">📋 Complaint</a>
+</div>
+
+<!-- DISABLED STATE (shown when visibility = DISABLED) -->
+<div id="disabledPage" class="page-content" style="display:none">
+  <div class="disabled-page">
+    <div class="icon">🔒</div>
+    <h2>Not Available</h2>
+    <p>The donor list is currently not available.<br>Please check back later.</p>
+    <a href="index.html" class="btn-primary" style="display:inline-flex;text-decoration:none;margin-top:24px">← Back to Home</a>
+  </div>
+</div>
+
+<!-- MAIN CONTENT -->
+<div id="mainContent">
+  <div class="page-hero">
+    <h1>👥 Generous Contributors</h1>
+    <p id="heroSub">Thank you to all who contributed!</p>
+  </div>
+
+  <div class="page-content">
+    <div class="stats-grid" id="statsGrid">
+      <div class="stat-mini"><div class="sv" id="sTotal">₹---</div><div class="sl">Total Raised</div></div>
+      <div class="stat-mini"><div class="sv" id="sCount">---</div><div class="sl">Contributors</div></div>
+      <div class="stat-mini"><div class="sv" id="sTop">₹---</div><div class="sl">Highest Gift</div></div>
+    </div>
+
+    <div class="list-controls">
+      <input type="text" id="searchDonor" placeholder="🔍 Search by name..." oninput="filterDonors()">
+      <select id="sortDonors" onchange="filterDonors()">
+        <option value="amount-desc">Amount ↓ High–Low</option>
+        <option value="amount-asc">Amount ↑ Low–High</option>
+        <option value="name">Name A–Z</option>
+        <option value="date">Latest First</option>
+      </select>
+    </div>
+
+    <div class="privacy-note">🔒 Phone numbers hidden for privacy. Only names and amounts are shown.</div>
+
+    <div class="donor-list" id="donorList"><div class="spinner"></div></div>
+  </div>
+</div>
+
+<footer class="footer"><p>🔒 Public Donor List — Privacy Protected</p></footer>
+<div class="toast-container" id="toastContainer"></div>
+
+<script src="config.js"></script>
+<script>
+let allDonors = [];
+
+// Load settings + visibility + donors in parallel
+Promise.all([
+  fetch(APP_CONFIG.SCRIPT_URL+"?action=getSettings").then(r=>r.json()).catch(()=>({})),
+  fetch(APP_CONFIG.SCRIPT_URL+"?action=getPublicVisibility").then(r=>r.json()).catch(()=>({})),
+  fetch(APP_CONFIG.SCRIPT_URL+"?action=getPublicPayments").then(r=>r.json()).catch(()=>({donors:[]}))
+]).then(([settings, vis, data])=>{
+  const name=settings.EventName||APP_CONFIG.EVENT_NAME||"EventPay";
+  document.getElementById("navEventName").textContent=name;
+  document.getElementById("heroSub").textContent="Thank you to everyone who contributed to "+name+"!";
+  document.title="Donor List — "+name;
+
+  // VISIBILITY CHECK — if disabled, hide everything and show disabled page
+  if(vis.showDonorList===false){
+    document.getElementById("mainContent").style.display="none";
+    document.getElementById("disabledPage").style.display="block";
+    return;
+  }
+
+  allDonors=data.donors||[];
+  updateStats(allDonors);
+  filterDonors();
+}).catch(()=>{
+  document.getElementById("donorList").innerHTML=`<div class="empty-state"><div class="e-icon">📡</div><h3>Connection Error</h3><p>Could not load donor list.</p></div>`;
+});
+
+function updateStats(d){
+  const total=d.reduce((s,x)=>s+Number(x.amount||0),0);
+  const top=d.length?Math.max(...d.map(x=>Number(x.amount||0))):0;
+  document.getElementById("sTotal").textContent="₹"+total.toLocaleString("en-IN");
+  document.getElementById("sCount").textContent=d.length.toLocaleString("en-IN");
+  document.getElementById("sTop").textContent="₹"+top.toLocaleString("en-IN");
+}
+
+function filterDonors(){
+  const q=(document.getElementById("searchDonor").value||"").toLowerCase();
+  const sort=document.getElementById("sortDonors").value;
+  let data=allDonors.filter(d=>!q||(d.name||"").toLowerCase().includes(q));
+  if(sort==="amount-desc") data.sort((a,b)=>b.amount-a.amount);
+  if(sort==="amount-asc")  data.sort((a,b)=>a.amount-b.amount);
+  if(sort==="name")        data.sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+  if(sort==="date")        data=[...data].reverse();
+  renderDonors(data);
+}
+
+function renderDonors(donors){
+  const el=document.getElementById("donorList");
+  if(!donors.length){
+    el.innerHTML=`<div class="empty-state"><div class="e-icon">🤝</div><h3>No contributions yet</h3><p>Be the first to contribute!</p></div>`;
+    return;
+  }
+  const rankEl=(i)=>{
+    if(i===0) return '<div class="donor-rank rank-1">🥇</div>';
+    if(i===1) return '<div class="donor-rank rank-2">🥈</div>';
+    if(i===2) return '<div class="donor-rank rank-3">🥉</div>';
+    return `<div class="donor-rank rank-other">#${i+1}</div>`;
+  };
+  el.innerHTML=donors.map((d,i)=>`
+    <div class="donor-item" style="animation-delay:${Math.min(i*0.035,0.4)}s">
+      ${rankEl(i)}
+      <div class="donor-info">
+        <div class="donor-name">${d.name||"Anonymous"}</div>
+        <div class="donor-date">${d.date||""}</div>
+      </div>
+      <div class="donor-amount">₹${Number(d.amount||0).toLocaleString("en-IN")}</div>
+    </div>`).join('');
+}
+
+function toggleNav(){document.getElementById("navMobile").classList.toggle("open");}
+function toggleTheme(){
+  const c=document.documentElement.getAttribute('data-theme')||'dark', n=c==='dark'?'light':'dark';
+  document.documentElement.setAttribute('data-theme',n); localStorage.setItem('theme',n);
+  document.getElementById('themeToggle').textContent=n==='dark'?'☀️ Light':'🌙 Dark';
+}
+window.addEventListener('DOMContentLoaded',()=>{
+  const t=document.documentElement.getAttribute('data-theme')||'dark';
+  document.getElementById('themeToggle').textContent=t==='dark'?'☀️ Light':'🌙 Dark';
+});
+</script>
+<script>if("serviceWorker"in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));</script>
+</body>
+</html>

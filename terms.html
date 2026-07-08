@@ -1,0 +1,195 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script>(function(){ const t=localStorage.getItem('theme')||'dark'; document.documentElement.setAttribute('data-theme',t); })();</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Terms of Service — EventPay</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared.css">
+<style>
+.legal-hero { background:linear-gradient(135deg,#1e1b4b,#312e81); padding:48px 20px; text-align:center; }
+[data-theme="light"] .legal-hero { background:linear-gradient(135deg,#4f46e5,#7c3aed); }
+.legal-hero h1 { font-size:clamp(24px,4vw,36px); font-weight:800; color:#fff; margin-bottom:8px; }
+.legal-hero p  { color:rgba(255,255,255,0.75); font-size:14px; }
+.legal-meta { display:flex; justify-content:center; gap:24px; flex-wrap:wrap; margin-top:16px; }
+.legal-meta span { font-size:12px; color:rgba(255,255,255,0.6); }
+
+.legal-content { max-width:780px; margin:0 auto; padding:40px 20px; }
+.legal-section { background:var(--surface); border:1px solid var(--border); border-radius:18px; padding:28px 24px; margin-bottom:16px; }
+.legal-section h2 { font-size:17px; font-weight:700; margin-bottom:14px; display:flex; align-items:center; gap:10px; color:var(--text); }
+.legal-section h2 .num { width:28px; height:28px; border-radius:50%; background:linear-gradient(135deg,var(--accent),var(--accent2)); color:white; font-size:12px; font-weight:800; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.legal-section p { color:var(--text-muted); font-size:14px; line-height:1.7; margin-bottom:10px; }
+.legal-section p:last-child { margin-bottom:0; }
+.legal-section ul { list-style:none; margin:10px 0; }
+.legal-section ul li { padding:7px 0 7px 20px; font-size:13px; color:var(--text-muted); border-bottom:1px solid var(--border); position:relative; line-height:1.5; }
+.legal-section ul li:last-child { border-bottom:none; }
+.legal-section ul li::before { content:'›'; position:absolute; left:0; color:var(--accent); font-weight:700; font-size:16px; line-height:1.2; }
+.info-box { background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.2); border-left:4px solid var(--accent); border-radius:10px; padding:14px 18px; margin:14px 0; font-size:13px; color:var(--text-muted); }
+.warn-box  { background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.2); border-left:4px solid var(--warning); border-radius:10px; padding:14px 18px; margin:14px 0; font-size:13px; color:var(--text-muted); }
+.contact-cta { background:linear-gradient(135deg,var(--accent),var(--accent2)); border-radius:18px; padding:28px; text-align:center; margin-bottom:16px; }
+.contact-cta h3 { color:white; font-size:18px; font-weight:700; margin-bottom:8px; }
+.contact-cta p  { color:rgba(255,255,255,0.8); font-size:13px; margin-bottom:16px; }
+.contact-cta a  { display:inline-flex; align-items:center; gap:8px; padding:10px 24px; background:rgba(255,255,255,0.15); border:1px solid rgba(255,255,255,0.3); border-radius:10px; color:white; text-decoration:none; font-weight:700; font-size:14px; transition:all 0.2s; }
+.contact-cta a:hover { background:rgba(255,255,255,0.25); }
+</style>
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="nav-logo" id="navLogo">EventPay</div>
+  <div class="nav-links">
+    <a href="index.html" class="nav-link">Home</a>
+    <a href="privacy_policy.html" class="nav-link">Privacy</a>
+    <a href="contact.html" class="nav-link">Contact</a>
+    <button class="theme-toggle-btn" id="themeToggle" onclick="toggleTheme()">☀️ Light</button>
+  </div>
+  <button class="hamburger" onclick="toggleNav()">☰</button>
+</nav>
+<div class="nav-mobile" id="navMobile">
+  <a href="index.html">🏠 Home</a>
+  <a href="privacy_policy.html">🔒 Privacy Policy</a>
+  <a href="contact.html">📬 Contact</a>
+</div>
+
+<div class="legal-hero">
+  <h1>📜 Terms of Service</h1>
+  <p>Please read these terms carefully before using EventPay Management</p>
+  <div class="legal-meta">
+    <span>📅 Effective: June 8, 2026</span>
+    <span>🔄 Version: 1.0</span>
+    <span>📦 App: EventPay Management</span>
+  </div>
+</div>
+
+<div class="legal-content">
+
+  <div class="info-box">
+    <strong>Quick Summary:</strong> By using EventPay Management, you agree to use it only for legitimate event payment collection, to provide accurate information, and not to misuse the platform for fraud or illegal activities.
+  </div>
+
+  <div class="legal-section">
+    <h2><span class="num">1</span> Acceptance of Terms</h2>
+    <p>By accessing or using the EventPay Management application ("the App"), you agree to be bound by these Terms of Service. If you do not agree to these terms, please do not use the App.</p>
+    <p>These terms apply to all users including event organizers, contributors, and administrators.</p>
+  </div>
+
+  <div class="legal-section">
+    <h2><span class="num">2</span> Use of the Service</h2>
+    <p>EventPay Management is designed for collecting and tracking event contributions and payments. Permitted uses include:</p>
+    <ul>
+      <li>Submitting payments for genuine events such as weddings, festivals, or community gatherings</li>
+      <li>Checking payment status using your Reference ID, phone number, or UTR</li>
+      <li>Filing legitimate complaints about payment issues</li>
+      <li>Administering event payments as an authorized organizer</li>
+    </ul>
+    <div class="warn-box">⚠️ <strong>Prohibited uses:</strong> Submitting fraudulent payments, using fake UTR numbers, impersonating other users, attempting to bypass fraud detection, or using the app for any illegal purpose.</div>
+  </div>
+
+  <div class="legal-section">
+    <h2><span class="num">3</span> Payment Accuracy</h2>
+    <p>By submitting a payment through this app, you confirm that:</p>
+    <ul>
+      <li>The UTR / Transaction ID you provide is genuine and belongs to an actual payment made to the event organizer's UPI ID</li>
+      <li>The name, phone number, and amount you provide are accurate</li>
+      <li>You have not previously submitted a payment with the same UTR</li>
+      <li>You understand that all payments are subject to manual verification by the event admin</li>
+    </ul>
+  </div>
+
+  <div class="legal-section">
+    <h2><span class="num">4</span> Fraud Detection</h2>
+    <p>EventPay employs automated fraud detection. The system may flag or reject submissions that appear suspicious, including:</p>
+    <ul>
+      <li>UTR numbers that match known fake or test patterns</li>
+      <li>Duplicate UTR numbers already used in the system</li>
+      <li>UTR numbers very similar to existing ones (possible typos or manipulation)</li>
+      <li>Multiple submissions from the same phone number</li>
+    </ul>
+    <p>Fraudulent submissions may be reported to appropriate authorities. The organizer reserves the right to reject any payment and seek legal recourse for fraudulent activity.</p>
+  </div>
+
+  <div class="legal-section">
+    <h2><span class="num">5</span> Data Accuracy & Responsibility</h2>
+    <p>You are responsible for the accuracy of all information you provide. The App and its operators are not liable for:</p>
+    <ul>
+      <li>Incorrect payment amounts or UTR numbers entered by users</li>
+      <li>Payments lost due to incorrect UPI IDs entered by users</li>
+      <li>Delays in payment verification during high-traffic periods</li>
+      <li>Technical issues with third-party payment apps (PhonePe, GPay, Paytm, etc.)</li>
+    </ul>
+  </div>
+
+  <div class="legal-section">
+    <h2><span class="num">6</span> Intellectual Property</h2>
+    <p>EventPay Management and its original content are the intellectual property of the event organizer and development team. You may not:</p>
+    <ul>
+      <li>Copy, modify, or redistribute the app's code without permission</li>
+      <li>Use the app's branding or design for other purposes</li>
+      <li>Reverse engineer or attempt to extract the app's source code</li>
+    </ul>
+  </div>
+
+  <div class="legal-section">
+    <h2><span class="num">7</span> Limitation of Liability</h2>
+    <p>To the maximum extent permitted by law, the app operators shall not be liable for any indirect, incidental, or consequential damages resulting from your use of the service. The app is provided "as is" without warranties of any kind.</p>
+    <div class="info-box">The total liability of the app operators for any claim related to the service shall not exceed the amount of the specific payment in dispute.</div>
+  </div>
+
+  <div class="legal-section">
+    <h2><span class="num">8</span> Termination</h2>
+    <p>The event organizer reserves the right to suspend or terminate access to any user who:</p>
+    <ul>
+      <li>Violates these terms of service</li>
+      <li>Submits fraudulent or false information</li>
+      <li>Attempts to manipulate the payment verification system</li>
+      <li>Engages in abusive behavior toward administrators</li>
+    </ul>
+  </div>
+
+  <div class="legal-section">
+    <h2><span class="num">9</span> Changes to Terms</h2>
+    <p>We may update these Terms of Service periodically. Continued use of the app after changes constitutes acceptance of the new terms. The "Effective Date" at the top of this page will be updated when changes are made.</p>
+  </div>
+
+  <div class="legal-section">
+    <h2><span class="num">10</span> Governing Law</h2>
+    <p>These terms are governed by the laws of India. Any disputes shall be subject to the jurisdiction of courts in the relevant district. The app operates in compliance with applicable Indian digital payment regulations.</p>
+  </div>
+
+  <div class="contact-cta">
+    <h3>Questions About These Terms?</h3>
+    <p>If you have questions or concerns about these Terms of Service, please contact us.</p>
+    <a href="contact.html">📬 Contact Us</a>
+  </div>
+
+</div>
+
+<footer class="footer">
+  <p>© 2026 EventPay Management. All rights reserved.</p>
+  <p style="margin-top:8px">
+    <a href="index.html" class="text-link" style="font-size:12px">Home</a> &nbsp;·&nbsp;
+    <a href="privacy_policy.html" class="text-link" style="font-size:12px">Privacy Policy</a> &nbsp;·&nbsp;
+    <a href="contact.html" class="text-link" style="font-size:12px">Contact</a>
+  </p>
+</footer>
+<div class="toast-container" id="toastContainer"></div>
+<script src="config.js"></script>
+<script>
+fetch(APP_CONFIG.SCRIPT_URL+"?action=getSettings").then(r=>r.json()).then(d=>{
+  const n=d.EventName||"EventPay"; document.getElementById("navLogo").textContent=n; document.title="Terms — "+n;
+}).catch(()=>{});
+function toggleNav(){document.getElementById("navMobile").classList.toggle("open");}
+function toggleTheme(){
+  const c=document.documentElement.getAttribute('data-theme')||'dark',n=c==='dark'?'light':'dark';
+  document.documentElement.setAttribute('data-theme',n);localStorage.setItem('theme',n);
+  document.getElementById('themeToggle').textContent=n==='dark'?'☀️ Light':'🌙 Dark';
+}
+window.addEventListener('DOMContentLoaded',()=>{
+  const t=document.documentElement.getAttribute('data-theme')||'dark';
+  document.getElementById('themeToggle').textContent=t==='dark'?'☀️ Light':'🌙 Dark';
+});
+</script>
+</body>
+</html>

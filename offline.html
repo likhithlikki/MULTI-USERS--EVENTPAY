@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#6366f1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="EventPay">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>No Internet — EventPay</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#6366f1">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Segoe UI', sans-serif;
+  background: #0b0f1a;
+  color: #f1f5f9;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+}
+.icon { font-size: 80px; margin-bottom: 24px; animation: float 2s ease-in-out infinite; }
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+h1 { font-size: 26px; font-weight: 800; margin-bottom: 12px; }
+p  { color: #94a3b8; font-size: 15px; line-height: 1.7; max-width: 300px; margin-bottom: 32px; }
+.btn {
+  padding: 14px 32px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: white;
+  border: none;
+  border-radius: 14px;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-bottom: 12px;
+  width: 100%;
+  max-width: 280px;
+  transition: transform 0.2s;
+}
+.btn:hover { transform: translateY(-2px); }
+.btn-outline {
+  background: transparent;
+  border: 1.5px solid rgba(255,255,255,0.15);
+  color: #94a3b8;
+}
+.tip {
+  margin-top: 32px;
+  padding: 16px;
+  background: rgba(99,102,241,0.08);
+  border: 1px solid rgba(99,102,241,0.2);
+  border-radius: 14px;
+  font-size: 13px;
+  color: #818cf8;
+  max-width: 300px;
+  line-height: 1.6;
+}
+</style>
+</head>
+<body>
+<div class="icon">📡</div>
+<h1>You're Offline</h1>
+<p>No internet connection. Please turn on WiFi or mobile data to use EventPay.</p>
+<button class="btn" onclick="location.reload()">🔄 Try Again</button>
+<button class="btn btn-outline" onclick="history.back()">← Go Back</button>
+<div class="tip">
+  💡 <strong>Tip:</strong> EventPay pages you've visited before will load even offline. But payments need internet to submit.
+</div>
+<script>
+// Auto-reload when connection comes back
+window.addEventListener("online", () => location.reload());
+</script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js")
+      .then(r => console.log("[SW] Registered:", r.scope))
+      .catch(e => console.log("[SW] Error:", e));
+  });
+}
+</script>
+</body>
+</html>

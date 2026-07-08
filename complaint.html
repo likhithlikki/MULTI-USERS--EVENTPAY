@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script>(function(){ const t=localStorage.getItem('theme')||'dark'; document.documentElement.setAttribute('data-theme',t); })();</script>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#6366f1">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>File a Complaint</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared.css">
+<style>
+.page-hero { background:linear-gradient(135deg,#1e1b4b,#312e81); padding:36px 20px; text-align:center; border-bottom:1px solid var(--border); }
+[data-theme="light"] .page-hero { background:linear-gradient(135deg,#4f46e5,#7c3aed); }
+.page-hero h1 { font-size:clamp(20px,4vw,30px); font-weight:800; color:#fff; margin-bottom:6px; }
+.page-hero p  { color:rgba(255,255,255,0.78); font-size:13px; }
+
+.complaint-card { background:var(--surface); border:1px solid var(--border); border-radius:20px; padding:28px 22px; max-width:500px; margin:0 auto; box-shadow:var(--card-shadow); animation:fadeInUp 0.4s ease both; }
+
+/* STEP TABS */
+.ctabs { display:flex; background:var(--surface2); border:1px solid var(--border); border-radius:12px; padding:4px; margin-bottom:22px; }
+.ctab { flex:1; padding:9px 6px; text-align:center; border:none; border-radius:8px; background:transparent; color:var(--text-muted); font-family:'Sora',sans-serif; font-size:12px; font-weight:700; cursor:pointer; transition:all 0.2s; }
+.ctab.active { background:var(--accent); color:#fff; box-shadow:0 2px 8px var(--accent-glow); }
+
+.form-section { display:none; }
+.form-section.active { display:block; animation:fadeIn 0.3s ease; }
+
+/* FILE UPLOAD */
+.file-drop-zone {
+  border:2px dashed var(--border2); border-radius:14px;
+  padding:24px; text-align:center; cursor:pointer;
+  transition:all 0.2s; background:var(--input-bg); position:relative;
+}
+.file-drop-zone:hover, .file-drop-zone.dragover { border-color:var(--accent); background:rgba(99,102,241,0.06); }
+.file-drop-zone input[type="file"] { position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%; }
+.file-icon { font-size:32px; margin-bottom:8px; }
+.file-label { font-size:13px; font-weight:600; color:var(--text-muted); margin-bottom:4px; }
+.file-hint  { font-size:11px; color:var(--text-dim); }
+.file-chosen { margin-top:10px; padding:8px 12px; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); border-radius:8px; font-size:12px; color:#34d399; display:none; }
+.file-chosen.show { display:flex; align-items:center; gap:8px; }
+.file-progress { display:none; margin-top:8px; }
+.file-progress.show { display:block; }
+
+/* VILLAGE AUTOCOMPLETE */
+.village-wrap { position:relative; }
+.village-suggestions {
+  position:absolute; top:100%; left:0; right:0; z-index:200;
+  background:var(--surface); border:1.5px solid var(--border2);
+  border-radius:12px; max-height:180px; overflow-y:auto;
+  box-shadow:var(--card-shadow); margin-top:4px; display:none;
+}
+.village-suggestions.open { display:block; }
+.vs-item {
+  padding:10px 14px; cursor:pointer; font-size:13px;
+  transition:background 0.15s; border-bottom:1px solid var(--border);
+  display:flex; align-items:center; gap:8px;
+}
+.vs-item:last-child { border-bottom:none; }
+.vs-item:hover { background:rgba(99,102,241,0.1); color:var(--accent); }
+.vs-item .vi { color:var(--text-muted); font-size:12px; }
+
+/* SUBMIT BUTTON */
+.submit-btn {
+  width:100%; padding:15px; background:linear-gradient(135deg,var(--accent),var(--accent2));
+  color:white; border:none; border-radius:14px; font-family:'Sora',sans-serif;
+  font-size:15px; font-weight:700; cursor:pointer; transition:all 0.3s; margin-top:8px;
+}
+.submit-btn:hover:not(:disabled) { transform:translateY(-2px); box-shadow:0 8px 24px var(--accent-glow); }
+.submit-btn:disabled { opacity:0.5; cursor:not-allowed; transform:none; }
+
+.msg-box { padding:12px 14px; border-radius:12px; font-size:13px; font-weight:500; margin-bottom:14px; display:none; animation:fadeIn 0.3s ease; }
+.msg-box.show { display:flex; align-items:center; gap:8px; }
+.msg-box.success { background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); color:#10b981; }
+.msg-box.error   { background:rgba(239,68,68,0.12);  border:1px solid rgba(239,68,68,0.3);  color:#ef4444; }
+
+/* SUCCESS SCREEN */
+#successScreen { display:none; text-align:center; padding:20px 0; animation:fadeInUp 0.4s ease; }
+.success-icon { font-size:64px; margin-bottom:16px; }
+.success-title { font-size:20px; font-weight:800; margin-bottom:8px; }
+.success-sub   { font-size:13px; color:var(--text-muted); margin-bottom:24px; }
+</style>
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="nav-logo" id="navEventName">EventPay</div>
+  <div class="nav-links">
+    <a href="index.html" class="nav-link">Home</a>
+    <a href="status.html" class="nav-link">Status</a>
+    <a href="complaint.html" class="nav-link active">Complaint</a>
+    <a href="admin-login.html" class="nav-link admin-link">Admin</a>
+    <button class="theme-toggle-btn" id="themeToggle" onclick="toggleTheme()">☀️ Light</button>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center">
+    <button class="theme-toggle-btn" id="themeToggleMob" onclick="toggleTheme()" style="display:none;font-size:14px;padding:6px 10px">🌙</button>
+    <button class="hamburger" onclick="toggleNav()">☰</button>
+  </div>
+</nav>
+<div class="nav-mobile" id="navMobile">
+  <a href="index.html">🏠 Home</a>
+  <a href="status.html">🔍 Check Status</a>
+  <a href="complaint.html">📋 Complaint</a>
+  <a href="admin-login.html">🔐 Admin</a>
+</div>
+
+<div class="page-hero">
+  <h1>📋 File a Complaint</h1>
+  <p>Report payment issues or share feedback</p>
+</div>
+
+<div class="page-content">
+  <div class="complaint-card" id="complaintForm">
+    <div class="ctabs">
+      <button class="ctab active" onclick="switchSection('details',this)">👤 Details</button>
+      <button class="ctab"        onclick="switchSection('complaint',this)">📝 Complaint</button>
+      <button class="ctab"        onclick="switchSection('attachment',this)">📎 Attachment</button>
+    </div>
+
+    <!-- SECTION 1: Personal Details -->
+    <div class="form-section active" id="sec-details">
+      <div class="form-group">
+        <label class="form-label">Full Name *</label>
+        <input class="form-input" type="text" id="c_name" placeholder="Your full name" autocomplete="name">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Village / Area *</label>
+        <div class="village-wrap">
+          <input class="form-input" type="text" id="c_village" placeholder="Your village or locality"
+                 oninput="filterVillages(this.value)" onblur="setTimeout(()=>closeVillages(),200)" autocomplete="off">
+          <div class="village-suggestions" id="villageSuggestions"></div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Phone Number *</label>
+        <input class="form-input" type="tel" id="c_phone" placeholder="10-digit mobile number" maxlength="10" autocomplete="tel">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email Address <span style="color:var(--text-dim)">(optional — for reply)</span></label>
+        <input class="form-input" type="email" id="c_email" placeholder="your@email.com" autocomplete="email">
+      </div>
+      <button class="btn-primary" style="width:100%;justify-content:center" onclick="switchSection('complaint',document.querySelectorAll('.ctab')[1])">Next: Complaint →</button>
+    </div>
+
+    <!-- SECTION 2: Complaint -->
+    <div class="form-section" id="sec-complaint">
+      <div class="form-group">
+        <label class="form-label">Your Complaint *</label>
+        <textarea class="form-input" id="c_complaint" rows="6"
+          placeholder="Describe your issue in detail — payment problem, incorrect amount, verification issue, etc."
+          style="resize:vertical;min-height:120px"></textarea>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:5px" id="charCount">0 / 1000 characters</div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn-outline" style="flex:1" onclick="switchSection('details',document.querySelectorAll('.ctab')[0])">← Back</button>
+        <button class="btn-primary" style="flex:2;justify-content:center" onclick="switchSection('attachment',document.querySelectorAll('.ctab')[2])">Next: Attachment →</button>
+      </div>
+    </div>
+
+    <!-- SECTION 3: Attachment + Submit -->
+    <div class="form-section" id="sec-attachment">
+      <div class="form-group">
+        <label class="form-label">Attach File <span style="color:var(--text-dim)">(optional — max 2MB)</span></label>
+        <div class="file-drop-zone" id="dropZone">
+          <input type="file" id="fileInput" accept="image/*,.pdf,.doc,.docx"
+                 onchange="onFileSelect(this)">
+          <div class="file-icon">📎</div>
+          <div class="file-label">Tap to attach a file or screenshot</div>
+          <div class="file-hint">Supports: Images, PDF, Word documents (max 2MB)</div>
+        </div>
+        <div class="file-chosen" id="fileChosen">
+          <span>📄</span><span id="fileName">No file</span>
+          <button onclick="clearFile()" style="margin-left:auto;background:none;border:none;cursor:pointer;color:var(--danger);font-size:16px">✕</button>
+        </div>
+        <div class="file-progress" id="fileProgress">
+          <div class="progress-bar"><div class="progress-fill" id="filePFill"></div></div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px" id="fileProgressText">Preparing...</div>
+        </div>
+      </div>
+
+      <div id="submitMsg" class="msg-box"></div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn-outline" style="flex:1" onclick="switchSection('complaint',document.querySelectorAll('.ctab')[1])">← Back</button>
+        <button class="submit-btn" id="submitBtn" onclick="submitComplaint()" style="flex:2">📤 Submit Complaint</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SUCCESS -->
+  <div class="complaint-card" id="successScreen">
+    <div class="success-icon">✅</div>
+    <div class="success-title">Complaint Submitted!</div>
+    <div class="success-sub">Your complaint has been received. If you provided an email, the admin will reply there.</div>
+    <a href="index.html" class="btn-primary" style="display:inline-flex;text-decoration:none;margin:0 auto">🏠 Back to Home</a>
+    <div style="margin-top:12px;text-align:center">
+      <a href="complaint.html" class="text-link" style="font-size:13px">Submit another complaint</a>
+    </div>
+  </div>
+</div>
+
+<footer class="footer"><p>🔒 Your complaint is confidential and handled by the event team</p></footer>
+<div class="toast-container" id="toastContainer"></div>
+
+<script src="config.js"></script>
+<script>
+let villages=[], selectedFile=null, fileBase64=null;
+
+// Load settings + villages
+fetch(APP_CONFIG.SCRIPT_URL+"?action=getSettings").then(r=>r.json()).then(d=>{
+  const n=d.EventName||APP_CONFIG.EVENT_NAME||"EventPay";
+  document.getElementById("navEventName").textContent=n;
+  document.title="File Complaint — "+n;
+}).catch(()=>{});
+
+fetch(APP_CONFIG.SCRIPT_URL+"?action=getVillageSuggestions").then(r=>r.json()).then(d=>{
+  villages=d.villages||[];
+}).catch(()=>{});
+
+// VILLAGE AUTOCOMPLETE
+function filterVillages(q){
+  const box=document.getElementById("villageSuggestions");
+  if(!q||q.length<2){box.classList.remove("open");return;}
+  const matches=villages.filter(v=>v.toLowerCase().includes(q.toLowerCase())).slice(0,8);
+  if(!matches.length){box.classList.remove("open");return;}
+  box.innerHTML=matches.map(v=>`<div class="vs-item" onclick="selectVillage('${v.replace(/'/g,"\\'")}')"><span>📍</span><span>${v}</span></div>`).join('');
+  box.classList.add("open");
+}
+function selectVillage(v){document.getElementById("c_village").value=v;closeVillages();}
+function closeVillages(){document.getElementById("villageSuggestions").classList.remove("open");}
+
+// SECTION TABS
+function switchSection(name,btn){
+  document.querySelectorAll('.form-section').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.ctab').forEach(b=>b.classList.remove('active'));
+  document.getElementById('sec-'+name).classList.add('active');
+  if(btn) btn.classList.add('active');
+}
+
+// CHAR COUNT
+document.getElementById("c_complaint").addEventListener("input",function(){
+  document.getElementById("charCount").textContent=this.value.length+" / 1000 characters";
+  if(this.value.length>1000) this.value=this.value.slice(0,1000);
+});
+
+// FILE HANDLING
+function onFileSelect(input){
+  const file=input.files[0]; if(!file) return;
+  if(file.size>2*1024*1024){toast("File too large. Max 2MB allowed.","error");input.value="";return;}
+  selectedFile=file;
+  document.getElementById("fileChosen").classList.add("show");
+  document.getElementById("fileName").textContent=file.name+" ("+Math.round(file.size/1024)+"KB)";
+  toast("File selected: "+file.name,"info");
+}
+function clearFile(){
+  selectedFile=null;fileBase64=null;
+  document.getElementById("fileInput").value="";
+  document.getElementById("fileChosen").classList.remove("show");
+  document.getElementById("fileProgress").classList.remove("show");
+}
+
+// Drag-and-drop
+const dz=document.getElementById("dropZone");
+dz.addEventListener("dragover",e=>{e.preventDefault();dz.classList.add("dragover");});
+dz.addEventListener("dragleave",()=>dz.classList.remove("dragover"));
+dz.addEventListener("drop",e=>{
+  e.preventDefault(); dz.classList.remove("dragover");
+  const file=e.dataTransfer.files[0]; if(!file) return;
+  document.getElementById("fileInput").files=e.dataTransfer.files;
+  onFileSelect(document.getElementById("fileInput"));
+});
+
+function showMsg(id,type,text){
+  const el=document.getElementById(id);
+  el.className="msg-box show "+type;
+  el.innerHTML=(type==="success"?"✅":type==="error"?"❌":"ℹ️")+" "+text;
+}
+
+async function readFileAsBase64(file){
+  return new Promise((res,rej)=>{
+    const r=new FileReader();
+    r.onload=e=>res(e.target.result.split(',')[1]);
+    r.onerror=()=>rej("File read error");
+    r.readAsDataURL(file);
+  });
+}
+
+async function submitComplaint(){
+  const name=document.getElementById("c_name").value.trim();
+  const village=document.getElementById("c_village").value.trim();
+  const phone=document.getElementById("c_phone").value.trim();
+  const email=document.getElementById("c_email").value.trim();
+  const complaint=document.getElementById("c_complaint").value.trim();
+
+  if(!name){showMsg("submitMsg","error","Please enter your full name.");switchSection("details",document.querySelectorAll('.ctab')[0]);return;}
+  if(!village){showMsg("submitMsg","error","Please enter your village/area.");switchSection("details",document.querySelectorAll('.ctab')[0]);return;}
+  if(!/^[6-9]\d{9}$/.test(phone)){showMsg("submitMsg","error","Please enter a valid 10-digit phone number.");switchSection("details",document.querySelectorAll('.ctab')[0]);return;}
+  if(!complaint||complaint.length<10){showMsg("submitMsg","error","Please describe your complaint (minimum 10 characters).");switchSection("complaint",document.querySelectorAll('.ctab')[1]);return;}
+
+  const btn=document.getElementById("submitBtn"); btn.disabled=true;
+  const fp=document.getElementById("fileProgress"), pf=document.getElementById("filePFill");
+
+  // Prepare file if selected
+  let filedata="", filename="", filetype="";
+  if(selectedFile){
+    fp.classList.add("show"); pf.style.width="0%";
+    document.getElementById("fileProgressText").textContent="Reading file...";
+    try {
+      pf.style.width="40%";
+      fileBase64=await readFileAsBase64(selectedFile);
+      filedata=fileBase64; filename=selectedFile.name; filetype=selectedFile.type;
+      pf.style.width="80%";
+      document.getElementById("fileProgressText").textContent="Uploading to Drive...";
+    } catch(e){
+      showMsg("submitMsg","error","Could not read file. Please try again.");
+      btn.disabled=false; return;
+    }
+  }
+
+  const params=new URLSearchParams({
+    action:"insertComplaint", name, village, phone, email, complaint,
+    filedata, filename, filetype
+  });
+
+  fetch(APP_CONFIG.SCRIPT_URL,{method:"POST",body:params}).then(r=>r.json()).then(res=>{
+    pf.style.width="100%";
+    setTimeout(()=>fp.classList.remove("show"),400);
+    btn.disabled=false;
+    if(res.result==="Inserted"){
+      document.getElementById("complaintForm").style.display="none";
+      document.getElementById("successScreen").style.display="block";
+      window.scrollTo({top:0,behavior:"smooth"});
+    } else {
+      showMsg("submitMsg","error","Submission failed. Please try again.");
+    }
+  }).catch(()=>{
+    pf.style.width="0%"; fp.classList.remove("show");
+    btn.disabled=false;
+    showMsg("submitMsg","error","Connection error. Please check your internet.");
+  });
+}
+
+function toggleNav(){document.getElementById("navMobile").classList.toggle("open");}
+function toggleTheme(){
+  const c=document.documentElement.getAttribute('data-theme')||'dark', n=c==='dark'?'light':'dark';
+  document.documentElement.setAttribute('data-theme',n); localStorage.setItem('theme',n);
+  document.getElementById('themeToggle').textContent=n==='dark'?'☀️ Light':'🌙 Dark';
+  const m=document.getElementById('themeToggleMob');if(m)m.textContent=n==='dark'?'☀️':'🌙';
+}
+window.addEventListener('DOMContentLoaded',()=>{
+  const t=document.documentElement.getAttribute('data-theme')||'dark';
+  document.getElementById('themeToggle').textContent=t==='dark'?'☀️ Light':'🌙 Dark';
+  if(window.innerWidth<=640&&document.getElementById('themeToggleMob')){
+    document.getElementById('themeToggleMob').style.display='block';
+    document.getElementById('themeToggleMob').textContent=t==='dark'?'☀️':'🌙';
+  }
+});
+function toast(msg,type="info"){
+  const tc=document.getElementById("toastContainer");
+  const t=document.createElement("div"); t.className="toast "+type; t.textContent=msg;
+  tc.appendChild(t);
+  setTimeout(()=>{t.classList.add("fade-out");setTimeout(()=>t.remove(),300);},3000);
+}
+</script>
+<script>if("serviceWorker"in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));</script>
+</body>
+</html>

@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script>(function(){ const t=localStorage.getItem('theme')||'dark'; document.documentElement.setAttribute('data-theme',t); })();</script>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#6366f1">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gallery</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared.css">
+<style>
+.page-hero { background:linear-gradient(135deg,#1e1b4b,#312e81); padding:38px 20px; text-align:center; border-bottom:1px solid var(--border); }
+[data-theme="light"] .page-hero { background:linear-gradient(135deg,#4f46e5,#7c3aed); }
+.page-hero h1 { font-size:clamp(20px,4vw,30px); font-weight:800; color:#fff; margin-bottom:6px; }
+.page-hero p  { color:rgba(255,255,255,0.78); font-size:13px; }
+
+/* SECTION HEADER */
+.section-header {
+  display:flex; align-items:center; justify-content:space-between;
+  margin:28px 0 14px; padding:14px 18px;
+  background:var(--surface); border:1px solid var(--border2); border-radius:16px;
+  flex-wrap:wrap; gap:10px;
+}
+.section-title { font-size:17px; font-weight:800; display:flex; align-items:center; gap:10px; color:var(--text); }
+.section-count { font-size:12px; color:var(--text-muted); font-weight:600; }
+.section-dl-btn {
+  display:flex; align-items:center; gap:6px;
+  padding:8px 16px; border-radius:10px;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  color:white; font-family:'Sora',sans-serif; font-size:12px; font-weight:700;
+  cursor:pointer; border:none; transition:all 0.2s; white-space:nowrap;
+}
+.section-dl-btn:hover { transform:translateY(-1px); box-shadow:0 4px 14px var(--accent-glow); }
+.section-dl-btn:disabled { opacity:0.5; cursor:not-allowed; }
+
+/* DOWNLOAD ALL BTN */
+.download-all-bar {
+  max-width:900px; margin:0 auto 20px;
+  display:flex; gap:10px; flex-wrap:wrap; justify-content:center;
+}
+.dl-all-btn {
+  display:flex; align-items:center; gap:6px;
+  padding:10px 18px; border-radius:12px;
+  background:var(--surface); border:1.5px solid var(--border2);
+  color:var(--text); font-family:'Sora',sans-serif; font-size:13px; font-weight:700;
+  cursor:pointer; transition:all 0.2s;
+}
+.dl-all-btn:hover { border-color:var(--accent); color:var(--accent); background:rgba(99,102,241,0.08); transform:translateY(-1px); }
+.dl-all-btn.primary { background:linear-gradient(135deg,var(--accent),var(--accent2)); color:white; border-color:transparent; }
+.dl-all-btn.primary:hover { box-shadow:0 4px 16px var(--accent-glow); color:white; }
+
+/* GALLERY GRID */
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px; max-width: 900px; margin: 0 auto 24px;
+}
+@media (max-width:480px) { .gallery-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; } }
+@media (min-width:768px) { .gallery-grid { grid-template-columns: repeat(4, 1fr); } }
+@media (min-width:1024px){ .gallery-grid { grid-template-columns: repeat(5, 1fr); } }
+
+.gallery-item {
+  position: relative; aspect-ratio: 1; border-radius: 12px;
+  overflow: hidden; cursor: pointer;
+  background: var(--surface2); border: 1px solid var(--border);
+  transition: transform 0.2s, box-shadow 0.2s;
+  animation: fadeIn 0.4s ease both;
+}
+.gallery-item:hover { transform: scale(1.03); box-shadow: 0 8px 24px rgba(0,0,0,0.4); border-color: var(--accent); }
+.gallery-item img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s; }
+.gallery-item:hover img { transform: scale(1.05); }
+
+/* PHOTO OVERLAY with buttons */
+.gallery-item .overlay {
+  position: absolute; inset: 0; background: rgba(0,0,0,0);
+  display: flex; flex-direction:column; align-items: center; justify-content: center; gap:6px;
+  transition: background 0.2s; padding:8px;
+}
+.gallery-item:hover .overlay { background: rgba(0,0,0,0.55); }
+.overlay-btns { display:flex; gap:6px; opacity:0; transition:opacity 0.2s; }
+.gallery-item:hover .overlay-btns { opacity:1; }
+.ov-btn {
+  padding:6px 10px; border-radius:8px; border:none; cursor:pointer;
+  font-family:'Sora',sans-serif; font-size:11px; font-weight:700;
+  transition:all 0.15s; white-space:nowrap;
+}
+.ov-btn-view { background:rgba(255,255,255,0.9); color:#1e1e3a; }
+.ov-btn-view:hover { background:white; }
+.ov-btn-dl   { background:rgba(99,102,241,0.9); color:white; }
+.ov-btn-dl:hover { background:var(--accent); }
+
+.gallery-item .img-name {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  background: linear-gradient(transparent, rgba(0,0,0,0.7));
+  color: white; font-size: 10px; padding: 20px 8px 6px;
+  text-overflow: ellipsis; overflow: hidden; white-space: nowrap;
+  opacity: 0; transition: opacity 0.2s;
+}
+.gallery-item:hover .img-name { opacity: 1; }
+
+/* SKELETON */
+.gallery-skeleton { aspect-ratio:1; border-radius:12px; background:linear-gradient(90deg,var(--surface) 25%,var(--surface2) 50%,var(--surface) 75%); background-size:200% 100%; animation:shimmer 1.5s infinite; }
+@keyframes shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
+
+/* LIGHTBOX */
+.lightbox {
+  position: fixed; inset: 0; z-index: 9000;
+  background: rgba(0,0,0,0.96); display: none;
+  align-items: center; justify-content: center; padding: 16px;
+}
+.lightbox.open { display: flex; animation: fadeIn 0.2s ease; }
+.lightbox-content { position: relative; max-width: 900px; max-height: 90vh; width: 100%; }
+.lightbox-img { width: 100%; max-height: 80vh; object-fit: contain; border-radius: 12px; }
+.lightbox-close {
+  position: absolute; top: -44px; right: 0;
+  background: none; border: none; color: white; font-size: 32px;
+  cursor: pointer; line-height: 1; transition: color 0.2s;
+}
+.lightbox-close:hover { color: var(--accent); }
+.lightbox-nav {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  background: rgba(255,255,255,0.1); border: none; color: white;
+  font-size: 24px; padding: 12px 16px; border-radius: 10px;
+  cursor: pointer; transition: all 0.2s; backdrop-filter: blur(4px);
+}
+.lightbox-nav:hover { background: rgba(99,102,241,0.4); }
+.lightbox-prev { left: -56px; }
+.lightbox-next { right: -56px; }
+.lightbox-caption { text-align: center; color: rgba(255,255,255,0.7); font-size: 13px; margin-top: 10px; }
+.lightbox-counter { position: absolute; top: -44px; left: 0; color: rgba(255,255,255,0.6); font-size: 13px; font-family:'JetBrains Mono',monospace; }
+.lightbox-dl-btn {
+  display:block; margin:10px auto 0; padding:8px 20px;
+  background:rgba(99,102,241,0.85); color:white; border:none; border-radius:9px;
+  font-family:'Sora',sans-serif; font-size:13px; font-weight:700; cursor:pointer;
+  transition:all 0.2s;
+}
+.lightbox-dl-btn:hover { background:var(--accent); }
+
+@media (max-width:600px) {
+  .lightbox-prev { left: -4px; }
+  .lightbox-next { right: -4px; }
+  .lightbox-nav { padding: 8px 12px; font-size: 18px; }
+}
+
+/* SECTION DIVIDER */
+.section-divider { border:none; border-top:1px solid var(--border); margin:8px 0 0; }
+
+/* DISABLED */
+.disabled-page { text-align:center; padding:80px 20px; }
+</style>
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="nav-logo" id="navEventName">EventPay</div>
+  <div class="nav-links">
+    <a href="index.html" class="nav-link">Home</a>
+    <a href="gallery.html" class="nav-link active">Gallery</a>
+    <a href="invite.html" class="nav-link">Invitation</a>
+    <a href="status.html" class="nav-link">Status</a>
+    <button class="theme-toggle-btn" id="themeToggle" onclick="toggleTheme()">☀️ Light</button>
+  </div>
+  <button class="hamburger" onclick="toggleNav()">☰</button>
+</nav>
+<div class="nav-mobile" id="navMobile">
+  <a href="index.html">🏠 Home</a>
+  <a href="gallery.html">📸 Gallery</a>
+  <a href="invite.html">💌 Invitation</a>
+  <a href="donors.html">👥 Donors</a>
+  <a href="status.html">🔍 Status</a>
+  <a href="complaint.html">📋 Complaint</a>
+</div>
+
+<!-- DISABLED STATE -->
+<div id="disabledPage" class="page-content" style="display:none">
+  <div class="disabled-page">
+    <div style="font-size:64px;margin-bottom:20px">📸</div>
+    <h2 style="font-size:22px;font-weight:800;margin-bottom:10px;color:var(--text-muted)">Gallery Coming Soon</h2>
+    <p style="color:var(--text-dim);font-size:14px">The photo gallery is not available yet. Please check back soon.</p>
+    <a href="index.html" class="btn-primary" style="display:inline-flex;text-decoration:none;margin-top:24px">← Back to Home</a>
+  </div>
+</div>
+
+<!-- MAIN CONTENT -->
+<div id="mainContent" style="display:none">
+  <div class="page-hero">
+    <h1>📸 Wedding Gallery</h1>
+    <p id="heroSub">Cherished moments and beautiful memories</p>
+  </div>
+
+  <div class="page-content" style="max-width:920px;margin:0 auto">
+    <!-- SKELETON -->
+    <div id="skeletonWrap" style="margin-top:20px">
+      <div class="gallery-grid">
+        <div class="gallery-skeleton"></div><div class="gallery-skeleton"></div>
+        <div class="gallery-skeleton"></div><div class="gallery-skeleton"></div>
+        <div class="gallery-skeleton"></div><div class="gallery-skeleton"></div>
+        <div class="gallery-skeleton"></div><div class="gallery-skeleton"></div>
+      </div>
+    </div>
+
+    <!-- DOWNLOAD ALL BAR -->
+    <div class="download-all-bar" id="dlAllBar" style="display:none"></div>
+
+    <!-- SECTIONS CONTAINER -->
+    <div id="sectionsContainer" style="display:none"></div>
+
+    <!-- EMPTY / ERROR -->
+    <div class="empty-state" id="emptyState" style="display:none">
+      <div class="e-icon">📷</div><h3>No Photos Yet</h3>
+      <p>Photos will appear here once uploaded to the gallery folders.</p>
+    </div>
+    <div class="empty-state" id="errorState" style="display:none">
+      <div class="e-icon">⚠️</div><h3>Could Not Load Gallery</h3>
+      <p id="errorMsg">Please check your internet connection and try again.</p>
+      <button onclick="loadGallery()" style="margin-top:16px;padding:10px 20px;background:var(--accent);color:white;border:none;border-radius:10px;cursor:pointer;font-family:'Sora',sans-serif;font-weight:700">Try Again</button>
+    </div>
+  </div>
+</div>
+
+<!-- LIGHTBOX -->
+<div class="lightbox" id="lightbox" onclick="closeLightboxOnBg(event)">
+  <div class="lightbox-content">
+    <div class="lightbox-counter" id="lightboxCounter">1 / 1</div>
+    <button class="lightbox-close" onclick="closeLightbox()">✕</button>
+    <button class="lightbox-nav lightbox-prev" onclick="navLightbox(-1)">‹</button>
+    <img class="lightbox-img" id="lightboxImg" src="" alt="">
+    <button class="lightbox-nav lightbox-next" onclick="navLightbox(1)">›</button>
+    <div class="lightbox-caption" id="lightboxCaption"></div>
+    <button class="lightbox-dl-btn" onclick="downloadCurrentPhoto()">⬇️ Download Photo</button>
+  </div>
+</div>
+
+<footer class="footer"><p>📸 Wedding Gallery — Memories Forever</p></footer>
+<div class="toast-container" id="toastContainer"></div>
+
+<script src="config.js"></script>
+<script>
+let allSections = {}, flatImages = [], currentIdx = 0, visibility = {};
+
+Promise.all([
+  fetch(APP_CONFIG.SCRIPT_URL+"?action=getSettings").then(r=>r.json()).catch(()=>({})),
+  fetch(APP_CONFIG.SCRIPT_URL+"?action=getPublicVisibility").then(r=>r.json()).catch(()=>({showGallery:true}))
+]).then(([settings, vis])=>{
+  visibility = vis;
+  const name = settings.EventName||APP_CONFIG.EVENT_NAME||"EventPay";
+  document.getElementById("navEventName").textContent = name;
+  document.title = "Gallery — "+name;
+  document.getElementById("heroSub").textContent = name + " — Wedding Album";
+
+  if(vis.showGallery===false){
+    document.getElementById("mainContent").style.display="none";
+    document.getElementById("disabledPage").style.display="block";
+    return;
+  }
+  document.getElementById("mainContent").style.display="block";
+  loadGallery();
+});
+
+function loadGallery() {
+  document.getElementById("skeletonWrap").style.display="block";
+  document.getElementById("sectionsContainer").style.display="none";
+  document.getElementById("emptyState").style.display="none";
+  document.getElementById("errorState").style.display="none";
+  document.getElementById("dlAllBar").style.display="none";
+
+  fetch(APP_CONFIG.SCRIPT_URL+"?action=getGalleryImages")
+    .then(r=>r.json())
+    .then(data=>{
+      document.getElementById("skeletonWrap").style.display="none";
+      if(data.error && !data.images?.length){
+        document.getElementById("errorState").style.display="block";
+        document.getElementById("errorMsg").textContent = data.error||"Could not load gallery.";
+        return;
+      }
+      allSections = data.sections||{};
+      buildFlatImages();
+      if(!flatImages.length){ document.getElementById("emptyState").style.display="block"; return; }
+      renderSections();
+    })
+    .catch(e=>{
+      document.getElementById("skeletonWrap").style.display="none";
+      document.getElementById("errorState").style.display="block";
+      document.getElementById("errorMsg").textContent="Connection error. Please try again.";
+    });
+}
+
+const SECTION_CONFIG = [
+  { key:"engagement", label:"💍 Engagement",   settingKey:"showEngagementGallery" },
+  { key:"haldi",      label:"🌼 Haldi Ceremony", settingKey:"showHaldiGallery"    },
+  { key:"marriage",   label:"💒 Marriage",       settingKey:"showMarriageGallery"  }
+];
+
+function buildFlatImages(){
+  flatImages = [];
+  SECTION_CONFIG.forEach(sc=>{
+    if(visibility[sc.settingKey]===false) return;
+    (allSections[sc.key]||[]).forEach((img,i)=>{
+      flatImages.push({...img, _sectionLabel:sc.label, _flatIdx:flatImages.length});
+    });
+  });
+}
+
+function renderSections(){
+  const container = document.getElementById("sectionsContainer");
+  container.innerHTML = "";
+  let totalPhotos = 0;
+  let hasSections = false;
+  const allowSectionDL = visibility.allowSectionDownload !== false;
+  const allowAllDL = visibility.allowDownloadAll !== false;
+
+  SECTION_CONFIG.forEach(sc=>{
+    if(visibility[sc.settingKey]===false) return;
+    const imgs = allSections[sc.key]||[];
+    if(!imgs.length) return;
+    hasSections = true;
+    totalPhotos += imgs.length;
+
+    // Section header
+    const hdr = document.createElement("div");
+    hdr.className = "section-header";
+    hdr.innerHTML = `
+      <div>
+        <div class="section-title">${sc.label}</div>
+        <div class="section-count">${imgs.length} photo${imgs.length!==1?'s':''}</div>
+      </div>
+      ${allowSectionDL ? `<button class="section-dl-btn" onclick="downloadSection('${sc.key}','${sc.label}')" id="dlSec_${sc.key}">⬇️ Download Entire Section</button>` : ""}
+    `;
+    container.appendChild(hdr);
+
+    // Grid
+    const grid = document.createElement("div");
+    grid.className = "gallery-grid";
+    imgs.forEach((img, localIdx)=>{
+      const flatIdx = flatImages.findIndex(f=>f.id===img.id);
+      const div = document.createElement("div");
+      div.className = "gallery-item";
+      div.innerHTML = `
+        <img src="${img.thumb||img.url}" alt="${img.name||''}" loading="lazy" onerror="this.src='${img.url}'">
+        <div class="overlay">
+          <div class="overlay-btns">
+            <button class="ov-btn ov-btn-view" onclick="openLightbox(${flatIdx},event)">🔍 View</button>
+            <button class="ov-btn ov-btn-dl"   onclick="downloadPhoto('${img.url}','${(img.name||'photo').replace(/'/g,"\\'")}',event)">⬇️</button>
+          </div>
+        </div>
+        <div class="img-name">${img.name||''}</div>
+      `;
+      grid.appendChild(div);
+    });
+    container.appendChild(grid);
+    container.appendChild(document.createElement("hr")).className = "section-divider";
+  });
+
+  if(!hasSections){ document.getElementById("emptyState").style.display="block"; return; }
+
+  // Download all bar
+  if(allowAllDL || allowSectionDL){
+    const bar = document.getElementById("dlAllBar");
+    bar.innerHTML = "";
+    if(allowSectionDL){
+      SECTION_CONFIG.forEach(sc=>{
+        if(visibility[sc.settingKey]===false) return;
+        if(!(allSections[sc.key]||[]).length) return;
+        const btn = document.createElement("button");
+        btn.className = "dl-all-btn";
+        btn.textContent = "⬇️ "+sc.label;
+        btn.onclick = ()=>downloadSection(sc.key, sc.label);
+        bar.appendChild(btn);
+      });
+    }
+    if(allowAllDL && totalPhotos > 0){
+      const btn = document.createElement("button");
+      btn.className = "dl-all-btn primary";
+      btn.textContent = "⬇️ Download All Photos ("+totalPhotos+")";
+      btn.onclick = downloadAllPhotos;
+      bar.appendChild(btn);
+    }
+    bar.style.display="flex";
+  }
+
+  document.getElementById("sectionsContainer").style.display="block";
+}
+
+// LIGHTBOX
+function openLightbox(flatIdx, e) {
+  if(e){ e.stopPropagation(); }
+  currentIdx = flatIdx;
+  updateLightbox();
+  document.getElementById("lightbox").classList.add("open");
+  document.body.style.overflow = "hidden";
+}
+function closeLightbox() {
+  document.getElementById("lightbox").classList.remove("open");
+  document.body.style.overflow = "";
+}
+function closeLightboxOnBg(e) { if(e.target===document.getElementById("lightbox")) closeLightbox(); }
+function navLightbox(dir) {
+  currentIdx = (currentIdx + dir + flatImages.length) % flatImages.length;
+  updateLightbox();
+}
+function updateLightbox() {
+  const img = flatImages[currentIdx];
+  if(!img) return;
+  document.getElementById("lightboxImg").src = img.url;
+  document.getElementById("lightboxCaption").textContent = (img.name||"") + (img._sectionLabel?" — "+img._sectionLabel:"");
+  document.getElementById("lightboxCounter").textContent = (currentIdx+1)+" / "+flatImages.length;
+}
+function downloadCurrentPhoto(){
+  const img = flatImages[currentIdx];
+  if(!img) return;
+  downloadPhoto(img.url, img.name||"photo");
+}
+
+// DOWNLOAD helpers
+function downloadPhoto(url, name, e){
+  if(e) e.stopPropagation();
+  // Try direct download via anchor
+  const a = document.createElement("a");
+  a.href = url.replace("uc?id=","uc?export=download&id=");
+  a.download = name;
+  a.target = "_blank";
+  a.rel = "noopener";
+  a.click();
+  toast("⬇️ Downloading "+name+"...","info");
+}
+
+async function downloadSection(sectionKey, label){
+  const imgs = allSections[sectionKey]||[];
+  if(!imgs.length){ toast("No photos in this section","error"); return; }
+  toast("⬇️ Downloading "+imgs.length+" photos from "+label+"... (each will open)","info");
+  // Sequential delayed downloads
+  for(let i=0;i<imgs.length;i++){
+    await new Promise(r=>setTimeout(r,400*i));
+    downloadPhoto(imgs[i].url, imgs[i].name||("photo_"+i));
+  }
+}
+
+async function downloadAllPhotos(){
+  const total = flatImages.length;
+  if(!total){ toast("No photos","error"); return; }
+  toast("⬇️ Starting download of "+total+" photos...","info");
+  for(let i=0;i<flatImages.length;i++){
+    await new Promise(r=>setTimeout(r,400*i));
+    downloadPhoto(flatImages[i].url, flatImages[i].name||("photo_"+i));
+  }
+}
+
+// Keyboard navigation
+document.addEventListener("keydown", e=>{
+  if(!document.getElementById("lightbox").classList.contains("open")) return;
+  if(e.key==="ArrowLeft")  navLightbox(-1);
+  if(e.key==="ArrowRight") navLightbox(1);
+  if(e.key==="Escape")     closeLightbox();
+});
+
+// Touch swipe
+let touchStartX=0;
+document.getElementById("lightbox").addEventListener("touchstart",e=>touchStartX=e.touches[0].clientX);
+document.getElementById("lightbox").addEventListener("touchend",e=>{
+  const diff=touchStartX-e.changedTouches[0].clientX;
+  if(Math.abs(diff)>50) navLightbox(diff>0?1:-1);
+});
+
+function toggleNav(){document.getElementById("navMobile").classList.toggle("open");}
+function toggleTheme(){
+  const c=document.documentElement.getAttribute('data-theme')||'dark', n=c==='dark'?'light':'dark';
+  document.documentElement.setAttribute('data-theme',n); localStorage.setItem('theme',n);
+  document.getElementById('themeToggle').textContent=n==='dark'?'☀️ Light':'🌙 Dark';
+}
+window.addEventListener('DOMContentLoaded',()=>{
+  const t=document.documentElement.getAttribute('data-theme')||'dark';
+  document.getElementById('themeToggle').textContent=t==='dark'?'☀️ Light':'🌙 Dark';
+});
+function toast(msg,type="info"){
+  const tc=document.getElementById("toastContainer");const t=document.createElement("div");
+  t.className="toast "+type;t.textContent=msg;tc.appendChild(t);
+  setTimeout(()=>{t.classList.add("fade-out");setTimeout(()=>t.remove(),300);},3500);
+}
+</script>
+<script>if("serviceWorker"in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));</script>
+</body>
+</html>
