@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script>(function(){const t=localStorage.getItem('ep_theme')||'dark';document.documentElement.setAttribute('data-theme',t)})();</script>
+<meta name="theme-color" content="#6366f1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
+<title>Contribute — EventPay</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<link rel="stylesheet" href="shared.css">
+<style>
+/* HERO */
+.hero-banner{background:linear-gradient(135deg,var(--accent),var(--accent2));padding:44px 20px 60px;text-align:center;position:relative;overflow:hidden}
+.hero-banner::before{content:'';position:absolute;inset:0;background:url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/svg%3E")}
+.back-to-events{position:absolute;top:16px;left:16px;display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.2);color:white;font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;text-decoration:none;z-index:10}
+.back-to-events:hover{background:rgba(255,255,255,0.25)}
+.hero-name{font-size:clamp(22px,5vw,38px);font-weight:800;color:#fff;margin:0 0 6px;position:relative;text-shadow:0 2px 20px rgba(0,0,0,.3)}
+.hero-sub{color:rgba(255,255,255,.85);font-size:13px;position:relative}
+.hero-wave{position:absolute;bottom:-1px;left:0;right:0}
+.hero-names{font-size:13px;color:rgba(255,255,255,.75);margin-bottom:2px;position:relative}
+
+/* COUNTER */
+.counter-section{max-width:440px;margin:-28px auto 0;position:relative;z-index:10;padding:0 16px}
+.counter-card{background:var(--surface);border:1px solid var(--border2);border-radius:20px;padding:18px 24px;display:grid;grid-template-columns:1fr 1px 1fr;box-shadow:var(--card-shadow);animation:fadeInUp .5s ease both}
+.counter-div{background:var(--border)}
+.counter-item{text-align:center;padding:4px 16px}
+.counter-lbl{font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px}
+.counter-val{font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;color:var(--accent)}
+.counter-sub{font-size:10px;color:var(--text-dim);margin-top:3px}
+.live-dot{display:inline-flex;align-items:center;gap:3px;font-size:10px;color:var(--success);font-weight:700;margin-top:3px}
+.live-dot::before{content:'●';font-size:7px;animation:pulse-dot 1.5s infinite}
+
+/* QUICK ACTIONS */
+.quick-actions{max-width:440px;margin:14px auto 0;padding:0 16px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.qa-btn{padding:10px 6px;border-radius:12px;border:1.5px solid var(--border2);background:var(--surface);color:var(--text);font-size:11px;font-weight:700;cursor:pointer;transition:all .2s;text-align:center;text-decoration:none;display:flex;flex-direction:column;align-items:center;gap:4px}
+.qa-btn:hover{border-color:var(--accent);color:var(--accent);background:rgba(99,102,241,.08);transform:translateY(-2px)}
+.qa-btn span:first-child{font-size:18px}
+
+/* STEPS */
+.steps-bar{display:flex;justify-content:center;align-items:center;padding:24px 20px 8px;max-width:420px;margin:0 auto}
+.step-item{display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;position:relative}
+.step-item::after{content:'';position:absolute;top:16px;left:50%;right:-50%;height:2px;background:var(--border);z-index:0;transition:background .4s}
+.step-item:last-child::after{display:none}
+.step-item.done::after{background:var(--accent)}
+.step-circle{width:32px;height:32px;border-radius:50%;border:2px solid var(--border);background:var(--surface);color:var(--text-muted);font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;position:relative;z-index:1;transition:all .4s cubic-bezier(.34,1.56,.64,1)}
+.step-item.active .step-circle{border-color:var(--accent);background:var(--accent);color:white;box-shadow:0 0 0 4px var(--accent-glow);transform:scale(1.15)}
+.step-item.done .step-circle{border-color:var(--success);background:var(--success);color:white}
+.step-label{font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px}
+.step-item.active .step-label{color:var(--accent)}
+.step-item.done .step-label{color:var(--success)}
+
+/* FORM CARD */
+.form-card{background:var(--surface);border-radius:20px;border:1px solid var(--border);padding:24px 20px;max-width:420px;margin:0 auto 20px;box-shadow:var(--card-shadow);animation:fadeInUp .5s ease both}
+.card-title{font-size:17px;font-weight:700;margin-bottom:18px;display:flex;align-items:center;gap:10px}
+.card-title .icon{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0}
+.form-group{margin-bottom:15px}
+.form-group label{display:block;font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px}
+.form-group input{width:100%;padding:13px 15px;background:var(--input-bg);border:1.5px solid var(--border);border-radius:12px;color:var(--text);font-family:'Sora',sans-serif;font-size:15px;transition:all .2s;box-sizing:border-box;-webkit-appearance:none}
+.form-group input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
+.form-group input.invalid{border-color:var(--danger);box-shadow:0 0 0 3px rgba(239,68,68,.1)}
+.form-group input.valid{border-color:var(--success)}
+.field-error{font-size:11px;color:var(--danger);margin-top:5px;display:none}
+.field-error.show{display:block}
+
+/* AMOUNT QUICK */
+.amount-quick{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.aq-btn{padding:7px 13px;border-radius:9px;border:1.5px solid var(--border2);background:var(--surface2);color:var(--text-muted);font-family:'Sora',sans-serif;font-size:12px;font-weight:700;cursor:pointer;transition:all .2s}
+.aq-btn:hover,.aq-btn.active{border-color:var(--accent);color:var(--accent);background:rgba(99,102,241,.1)}
+
+/* VILLAGE AUTOCOMPLETE */
+.village-wrap{position:relative}
+.village-dd{position:absolute;top:100%;left:0;right:0;z-index:200;background:var(--surface);border:1.5px solid var(--border2);border-radius:12px;max-height:180px;overflow-y:auto;box-shadow:var(--card-shadow);margin-top:4px;display:none}
+.village-dd.open{display:block}
+.vd-item{padding:10px 14px;cursor:pointer;font-size:13px;transition:background .15s;border-bottom:1px solid var(--border)}
+.vd-item:last-child{border-bottom:none}
+.vd-item:hover{background:rgba(99,102,241,.1);color:var(--accent)}
+
+.proceed-btn{width:100%;padding:14px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:white;border:none;border-radius:14px;font-family:'Sora',sans-serif;font-size:15px;font-weight:700;cursor:pointer;transition:all .3s;margin-top:8px}
+.proceed-btn:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 8px 24px var(--accent-glow)}
+.proceed-btn:disabled{opacity:.5;cursor:not-allowed}
+
+/* PAYMENT */
+#paymentSection{display:none}
+.qr-wrapper{text-align:center;padding:16px}
+.qr-container{display:inline-block;padding:14px;background:white;border-radius:16px;box-shadow:0 4px 20px rgba(0,0,0,.2);position:relative}
+.qr-pulse{position:absolute;inset:-4px;border-radius:20px;border:2px solid var(--accent);animation:pulse-ring 2s infinite;pointer-events:none}
+@keyframes pulse-ring{0%,100%{opacity:.6;transform:scale(1)}50%{opacity:.2;transform:scale(1.03)}}
+.amount-badge{display:inline-block;background:linear-gradient(135deg,var(--accent),var(--accent2));color:white;padding:5px 18px;border-radius:20px;font-size:17px;font-weight:700;margin-bottom:14px;font-family:'JetBrains Mono',monospace}
+.upi-apps{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:14px 0}
+.upi-app-btn{display:flex;align-items:center;gap:6px;padding:8px 12px;background:var(--surface);border:1.5px solid var(--border);border-radius:10px;color:var(--text);font-size:12px;font-weight:600;cursor:pointer;transition:all .2s;font-family:'Sora',sans-serif}
+.upi-app-btn:hover{border-color:var(--accent);background:rgba(99,102,241,.08);transform:translateY(-1px)}
+.divider-text{text-align:center;color:var(--text-muted);font-size:12px;font-weight:600;margin:14px 0;position:relative}
+.divider-text::before,.divider-text::after{content:'';position:absolute;top:50%;width:38%;height:1px;background:var(--border)}
+.divider-text::before{left:0}.divider-text::after{right:0}
+.utr-note{background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.3);border-radius:10px;padding:11px;font-size:12px;color:#fbbf24;margin-bottom:14px;display:flex;gap:8px;align-items:flex-start}
+.utr-risk-bar{margin-top:8px;display:none}
+.utr-risk-bar.show{display:block;animation:fadeIn .3s ease}
+.finish-btn{width:100%;padding:14px;background:linear-gradient(135deg,#10b981,#059669);color:white;border:none;border-radius:14px;font-family:'Sora',sans-serif;font-size:15px;font-weight:700;cursor:pointer;transition:all .3s;margin-top:8px}
+.finish-btn:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(16,185,129,.4)}
+.back-link{display:flex;align-items:center;gap:6px;color:var(--text-muted);font-size:14px;cursor:pointer;margin-bottom:16px;width:fit-content;transition:color .2s}
+.back-link:hover{color:var(--accent)}
+.msg-box{padding:12px 14px;border-radius:12px;font-size:13px;font-weight:500;margin-bottom:14px;display:none;align-items:center;gap:8px;animation:fadeIn .3s ease}
+.msg-box.show{display:flex}
+.msg-box.success{background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.3);color:#10b981}
+.msg-box.error{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#ef4444}
+.msg-box.warning{background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);color:#fbbf24}
+
+/* RECEIPT */
+#receiptSection{display:none}
+.receipt-card{background:white;color:#1a1a2e;border-radius:20px;padding:24px 20px;max-width:380px;margin:0 auto;font-family:'Sora',sans-serif}
+.receipt-header{text-align:center;border-bottom:2px dashed #e2e8f0;padding-bottom:16px;margin-bottom:16px}
+.receipt-org{font-size:11px;font-weight:600;color:#64748b;letter-spacing:1px;text-transform:uppercase}
+.receipt-event{font-size:18px;font-weight:800;color:#1e293b;margin:4px 0}
+.receipt-amount-big{text-align:center;margin:12px 0;padding:14px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:14px;color:white}
+.receipt-amount-big .label{font-size:10px;opacity:.8;text-transform:uppercase;letter-spacing:1px}
+.receipt-amount-big .value{font-size:28px;font-weight:800;font-family:'JetBrains Mono',monospace}
+.receipt-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f1f5f9;font-size:13px}
+.receipt-row:last-child{border-bottom:none}
+.receipt-row .key{color:#64748b;font-weight:500}
+.receipt-row .val{color:#1e293b;font-weight:600;text-align:right;max-width:180px;word-break:break-all}
+.ref-badge{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px;text-align:center;margin:14px 0}
+.ref-badge .ref-label{font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px}
+.ref-badge .ref-id{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:#6366f1;margin-top:3px;word-break:break-all}
+.receipt-status-badge{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:20px;font-size:12px;font-weight:700;background:#dbeafe;color:#1d4ed8}
+.receipt-footer{text-align:center;margin-top:14px;padding-top:14px;border-top:2px dashed #e2e8f0;font-size:11px;color:#94a3b8;line-height:1.6}
+.download-btn{width:100%;padding:13px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;border:none;border-radius:14px;font-family:'Sora',sans-serif;font-size:14px;font-weight:700;cursor:pointer;margin-top:14px;transition:all .3s;display:flex;align-items:center;justify-content:center;gap:8px;max-width:420px;margin-left:auto;margin-right:auto;box-sizing:border-box}
+.download-btn:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(99,102,241,.4)}
+
+/* RECENT TRANSACTIONS */
+.recent-section{max-width:440px;margin:28px auto 0;padding:0 16px}
+.rtx-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;margin-top:10px}
+.rtx-item{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--border);font-size:13px;gap:10px}
+.rtx-item:last-child{border-bottom:none}
+.rtx-name{font-weight:700}
+.rtx-village{font-size:11px;color:var(--text-dim)}
+.rtx-amount{font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--accent);white-space:nowrap}
+.rtx-date{font-size:10px;color:var(--text-dim)}
+</style>
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="nav-logo" id="navEventName" style="cursor:pointer" onclick="window.location.href='index.html'">EventPay</div>
+  <div class="nav-links">
+    <a href="home.html" class="nav-link active">Home</a>
+    <a href="donors.html" class="nav-link" id="navDonors" style="display:none">Donors</a>
+    <a href="status.html" class="nav-link">Status</a>
+    <a href="gallery.html" class="nav-link" id="navGallery" style="display:none">Gallery</a>
+    <a href="complaint.html" class="nav-link">Support</a>
+    <a href="index.html" class="nav-link" style="color:var(--text-dim);font-size:11px">⬅ All Events</a>
+  </div>
+  <div class="nav-right">
+    <button class="theme-btn" id="themeBtn" onclick="toggleTheme()">🌙</button>
+    <button class="hamburger" onclick="toggleMobileMenu()">☰</button>
+  </div>
+</nav>
+<div class="mobile-menu" id="mobileMenu">
+  <a href="home.html">🏠 Home</a>
+  <a href="donors.html" id="mobNavDonors" style="display:none">👥 Donors</a>
+  <a href="status.html">🔍 Status</a>
+  <a href="gallery.html" id="mobNavGallery" style="display:none">📸 Gallery</a>
+  <a href="invite.html" id="mobNavInvite" style="display:none">💌 Invitation</a>
+  <a href="complaint.html">📋 Support</a>
+  <a href="contact.html">📞 Contact</a>
+  <a href="admin-login.html">🔐 Admin</a>
+  <a href="index.html" style="color:var(--accent)">⬅ All Events</a>
+</div>
+
+<!-- HERO -->
+<div class="hero-banner">
+  <a href="index.html" class="back-to-events">⬅ All Events</a>
+  <div class="hero-names" id="coupleNames"></div>
+  <div class="hero-name" id="eventTitle">Loading...</div>
+  <div class="hero-sub">Secure • Fast • Transparent</div>
+  <svg class="hero-wave" viewBox="0 0 1440 48" fill="none"><path d="M0 48h1440V24C1200 48 960 0 720 0S240 48 0 24V48z" fill="var(--bg)"/></svg>
+</div>
+
+<!-- COUNTER -->
+<div class="counter-section" id="counterSection" style="display:none">
+  <div class="counter-card">
+    <div class="counter-item">
+      <div class="counter-lbl">Total Contributions</div>
+      <div class="counter-val" id="totalAmount">₹---</div>
+      <div class="counter-sub">Verified payments</div>
+      <div class="live-dot">Live</div>
+    </div>
+    <div class="counter-div"></div>
+    <div class="counter-item">
+      <div class="counter-lbl">Contributors</div>
+      <div class="counter-val" id="totalCount">---</div>
+      <div class="counter-sub">People contributed</div>
+      <div class="live-dot">Live</div>
+    </div>
+  </div>
+</div>
+
+<!-- QUICK ACTIONS -->
+<div class="quick-actions" id="quickActions">
+  <a href="donors.html" class="qa-btn" id="qaaDonors" style="display:none"><span>👥</span><span>Donors</span></a>
+  <a href="invite.html" class="qa-btn" id="qaaInvite" style="display:none"><span>💌</span><span>Invite</span></a>
+  <a href="gallery.html" class="qa-btn" id="qaaGallery" style="display:none"><span>📸</span><span>Gallery</span></a>
+  <a href="status.html" class="qa-btn"><span>🔍</span><span>Status</span></a>
+</div>
+
+<div class="page-content">
+  <!-- STEPS -->
+  <div class="steps-bar" id="stepsBar">
+    <div class="step-item active" id="step1"><div class="step-circle">1</div><span class="step-label">Details</span></div>
+    <div class="step-item" id="step2"><div class="step-circle">2</div><span class="step-label">Payment</span></div>
+    <div class="step-item" id="step3"><div class="step-circle">✓</div><span class="step-label">Receipt</span></div>
+  </div>
+
+  <!-- FORM -->
+  <div id="formSection">
+    <div class="form-card">
+      <div class="card-title"><div class="icon">👤</div>Your Details</div>
+      <div class="form-group">
+        <label>Full Name</label>
+        <input type="text" id="name" placeholder="Enter your full name" autocomplete="name">
+        <div class="field-error" id="nameErr">Enter a valid name (letters only)</div>
+      </div>
+      <div class="form-group">
+        <label>Village / Area</label>
+        <div class="village-wrap">
+          <input type="text" id="village" placeholder="Your village or locality" oninput="filterVDD(this.value)" onblur="setTimeout(closeVDD,200)" autocomplete="off">
+          <div class="village-dd" id="villageDD"></div>
+        </div>
+        <div class="field-error" id="villageErr">Village name is required</div>
+      </div>
+      <div class="form-group">
+        <label>Phone Number</label>
+        <input type="tel" id="phone" placeholder="10-digit mobile number" maxlength="10" autocomplete="tel">
+        <div class="field-error" id="phoneErr">Enter a valid 10-digit number</div>
+      </div>
+      <div class="form-group">
+        <label>Contribution Amount (₹)</label>
+        <div class="amount-quick" id="amountQuick"></div>
+        <input type="number" id="amount" placeholder="Minimum ₹50" min="50">
+        <div class="field-error" id="amountErr">Enter a valid amount</div>
+      </div>
+      <button class="proceed-btn" id="proceedBtn" onclick="goToPayment()" disabled>Proceed to Payment →</button>
+    </div>
+  </div>
+
+  <!-- PAYMENT -->
+  <div id="paymentSection">
+    <div class="form-card">
+      <div class="back-link" onclick="backToForm()">← Back to Details</div>
+      <div class="card-title"><div class="icon">📲</div>Scan &amp; Pay</div>
+      <div class="qr-wrapper">
+        <div class="qr-container"><div id="qrcode"></div><div class="qr-pulse"></div></div>
+        <div class="amount-badge" id="amountBadge">₹0</div>
+      </div>
+      <div class="upi-apps">
+        <button class="upi-app-btn" onclick="openUPI('phonepe')">📱 PhonePe</button>
+        <button class="upi-app-btn" onclick="openUPI('gpay')">💚 GPay</button>
+        <button class="upi-app-btn" onclick="openUPI('paytm')">💙 Paytm</button>
+        <button class="upi-app-btn" onclick="openUPI('bhim')">🇮🇳 BHIM</button>
+      </div>
+      <div class="divider-text">After payment, enter UTR below</div>
+      <div class="utr-note">⚠️ <span>Enter the 12-digit UTR / Transaction ID from your payment app after successful payment.</span></div>
+      <div class="form-group">
+        <label>UTR / Transaction Reference</label>
+        <input type="text" id="utr" placeholder="e.g. 423819874512" maxlength="30" oninput="checkUTRRisk(this.value)">
+        <div class="utr-risk-bar" id="utrRiskBar">
+          <div id="utrRiskLabel">Checking...</div>
+        </div>
+      </div>
+      <div id="payMsg" class="msg-box"></div>
+      <div class="progress-bar" id="progressBar" style="display:none"><div class="progress-fill" id="progressFill"></div></div>
+      <button class="finish-btn" id="finishBtn" onclick="finishPayment()">✓ Confirm Payment</button>
+    </div>
+  </div>
+
+  <!-- RECEIPT -->
+  <div id="receiptSection">
+    <div id="receipt" class="receipt-card">
+      <div class="receipt-header">
+        <div class="receipt-org" id="r_org">Organisation</div>
+        <div class="receipt-event" id="r_event">Event</div>
+        <div style="font-size:11px;color:#94a3b8">Payment Receipt</div>
+      </div>
+      <div class="receipt-amount-big"><div class="label">Amount Paid</div><div class="value" id="r_amount">₹0</div></div>
+      <div class="receipt-row"><span class="key">Name</span><span class="val" id="r_name">—</span></div>
+      <div class="receipt-row"><span class="key">Village</span><span class="val" id="r_village">—</span></div>
+      <div class="receipt-row"><span class="key">Phone</span><span class="val" id="r_phone">—</span></div>
+      <div class="receipt-row"><span class="key">UTR No.</span><span class="val" id="r_utr">—</span></div>
+      <div class="receipt-row"><span class="key">Date &amp; Time</span><span class="val" id="r_datetime">—</span></div>
+      <div class="receipt-row"><span class="key">Status</span><span class="val"><span class="receipt-status-badge" id="r_status">⏳ Pending</span></span></div>
+      <div class="ref-badge">
+        <div class="ref-label">Reference ID (save this!)</div>
+        <div class="ref-id" id="r_refid">—</div>
+      </div>
+      <div class="receipt-footer">⚠️ Subject to admin verification.<br>Check status using your Ref ID at <strong>status.html</strong><br><small>Generated: <span id="r_gentime"></span></small></div>
+    </div>
+    <button class="download-btn" onclick="downloadReceipt()">⬇️ Download Receipt as Image</button>
+    <div style="text-align:center;margin-top:12px">
+      <a href="status.html" class="text-link">Check Payment Status →</a>
+    </div>
+  </div>
+</div>
+
+<!-- RECENT TRANSACTIONS -->
+<div class="recent-section" id="recentSection" style="display:none">
+  <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--text-dim);margin-bottom:8px">⚡ Recent Contributions</div>
+  <div class="rtx-card" id="recentList"></div>
+</div>
+
+<footer class="footer">
+  <p>🔒 Secure Payment |
+    <a href="privacy.html">Privacy</a> |
+    <a href="terms.html">Terms</a> |
+    <a href="complaint.html">Support</a> |
+    <a href="index.html" style="color:var(--text-dim)">All Events</a>
+  </p>
+</footer>
+<div class="toast-container" id="toastContainer"></div>
+
+<script src="config.js"></script>
+<script>
+// ============================================================
+// HOME.HTML — Per-event contribution page
+// Reads event from sessionStorage/localStorage set by index.html
+// ============================================================
+if (!requireEvent()) { /* redirected */ }
+
+let EVENT_API = getEventAPI();
+let eventObj  = {};
+try {
+  eventObj = JSON.parse(sessionStorage.getItem("ep_event_obj") || localStorage.getItem("ep_event_obj") || "{}");
+} catch(e) {}
+
+let userData={}, upiLink="", upiID="", eventName="Event", orgName="Organisation";
+let villages=[], utrCheckTimer=null;
+let minAmt=50, maxAmt=0;
+
+// Build quick amount buttons
+EP.QUICK_AMTS.forEach(a => {
+  const b=document.createElement("button");
+  b.className="aq-btn"; b.textContent="₹"+a.toLocaleString("en-IN");
+  b.onclick=()=>{
+    document.getElementById("amount").value=a;
+    document.querySelectorAll(".aq-btn").forEach(x=>x.classList.remove("active"));
+    b.classList.add("active"); validate();
+  };
+  document.getElementById("amountQuick").appendChild(b);
+});
+
+// Pre-populate from eventObj if available (instant display before API)
+if (eventObj.EventName) {
+  document.getElementById("eventTitle").textContent = eventObj.EventName;
+  document.getElementById("navEventName").textContent = eventObj.EventName;
+  document.title = eventObj.EventName + " — Contribute";
+  if (eventObj.GroomName && eventObj.BrideName) {
+    document.getElementById("coupleNames").textContent = eventObj.GroomName + " 💍 " + eventObj.BrideName;
+  } else if (eventObj.GroomName || eventObj.BrideName) {
+    document.getElementById("coupleNames").textContent = eventObj.GroomName || eventObj.BrideName;
+  }
+  orgName = eventObj.OrganizerName || "Organisation";
+}
+
+// Load full settings from event API
+Promise.all([
+  api(EVENT_API, "getSettings").catch(()=>({})),
+  api(EVENT_API, "getPublicVisibility").catch(()=>({})),
+  api(EVENT_API, "getPublicStats").catch(()=>({total:0,count:0})),
+  api(EVENT_API, "getVillageSuggestions").catch(()=>({villages:[]})),
+  api(EVENT_API, "getRecentTransactions").catch(()=>({transactions:[]}))
+]).then(([settings, vis, stats, vsug, rtx]) => {
+  upiID     = settings.UPI_ID || eventObj.UpiID || "";
+  eventName = settings.EventName || eventObj.EventName || "Event";
+  orgName   = settings.OrganizerName || settings.ORG_NAME || eventObj.OrganizerName || "Organisation";
+  minAmt    = parseFloat(settings.MIN_AMOUNT)||50;
+  maxAmt    = parseFloat(settings.MAX_AMOUNT)||0;
+
+  document.getElementById("eventTitle").textContent    = eventName;
+  document.getElementById("navEventName").textContent  = eventName;
+  document.title = eventName + " — Contribute";
+
+  // Couple names
+  const bride  = settings.BrideName  || eventObj.BrideName  || "";
+  const groom  = settings.GroomName  || eventObj.GroomName  || "";
+  if (bride && groom) document.getElementById("coupleNames").textContent = groom+" 💍 "+bride;
+  else if (bride || groom) document.getElementById("coupleNames").textContent = bride||groom;
+
+  // Visibility
+  if (vis.showStatistics !== false) {
+    document.getElementById("counterSection").style.display="block";
+    document.getElementById("totalAmount").textContent="₹"+Number(stats.total||0).toLocaleString("en-IN");
+    document.getElementById("totalCount").textContent=Number(stats.count||0).toLocaleString("en-IN");
+  }
+  const showD = vis.showDonorList!==false;
+  const showG = vis.showGallery!==false;
+  const showI = vis.showInviteCard!==false;
+  ["qaaDonors","navDonors","mobNavDonors"].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=showD?"":"none"});
+  ["qaaGallery","navGallery","mobNavGallery"].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=showG?"":"none"});
+  ["qaaInvite","mobNavInvite"].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=showI?"":"none"});
+
+  // Amount input
+  if (maxAmt>0) document.getElementById("amount").max=maxAmt;
+  document.getElementById("amount").min=minAmt;
+  document.getElementById("amount").placeholder="Minimum ₹"+minAmt;
+
+  // Villages
+  villages = vsug.villages||[];
+
+  // Recent transactions
+  const txs = (rtx.transactions||[]).slice(0,5);
+  if (vis.showRecentPayments!==false && txs.length) {
+    document.getElementById("recentSection").style.display="block";
+    document.getElementById("recentList").innerHTML=txs.map(t=>`
+      <div class="rtx-item">
+        <div><div class="rtx-name">${sanitize(t.name)}</div><div class="rtx-village">📍 ${sanitize(t.village||"")}</div></div>
+        <div style="text-align:right"><div class="rtx-amount">${fmtINR(t.amount)}</div><div class="rtx-date">${t.date||""}</div></div>
+      </div>`).join("");
+  }
+}).catch(e=>{
+  toast("Could not load event data. Check API connection.","error");
+  console.error(e);
+});
+
+// VILLAGE AUTOCOMPLETE
+function filterVDD(q){
+  const box=document.getElementById("villageDD");
+  if(!q||q.length<2){box.classList.remove("open");return;}
+  const m=villages.filter(v=>v.toLowerCase().includes(q.toLowerCase())).slice(0,7);
+  if(!m.length){box.classList.remove("open");return;}
+  box.innerHTML=m.map(v=>`<div class="vd-item" onclick="selectVD('${v.replace(/'/g,"\\'")}')">📍 ${v}</div>`).join("");
+  box.classList.add("open");
+}
+function selectVD(v){document.getElementById("village").value=v;closeVDD();validate()}
+function closeVDD(){document.getElementById("villageDD").classList.remove("open")}
+
+// UTR RISK
+function checkUTRRisk(val){
+  clearTimeout(utrCheckTimer);
+  const bar=document.getElementById("utrRiskBar"),lbl=document.getElementById("utrRiskLabel");
+  if(!val||val.length<8){bar.classList.remove("show");return}
+  utrCheckTimer=setTimeout(()=>{
+    api(EVENT_API,"validateUTR",{utr:val,phone:document.getElementById("phone").value||""},"GET")
+    .then(d=>{
+      bar.classList.add("show");
+      if(d.risk==="LOW") lbl.innerHTML='<span class="badge risk-low">✅ Low Risk</span> UTR looks valid';
+      else if(d.risk==="MEDIUM") lbl.innerHTML='<span class="badge risk-med">⚠️ Medium Risk</span> '+(d.flags&&d.flags[0]||"");
+      else lbl.innerHTML='<span class="badge risk-high">❌ High Risk</span> '+(d.flags&&d.flags[0]||"");
+    }).catch(()=>{});
+  },600);
+}
+
+// VALIDATION
+const nameIn=document.getElementById("name"),villageIn=document.getElementById("village"),
+      phoneIn=document.getElementById("phone"),amtIn=document.getElementById("amount"),
+      procBtn=document.getElementById("proceedBtn");
+function validate(){
+  let ok=true;
+  const nOk=/^[A-Za-z ]{2,}$/.test(nameIn.value.trim());
+  nameIn.classList.toggle("invalid",!nOk&&nameIn.value.trim()); nameIn.classList.toggle("valid",nOk);
+  document.getElementById("nameErr").classList.toggle("show",!nOk&&!!nameIn.value.trim());
+  if(!nOk)ok=false;
+  const vOk=villageIn.value.trim().length>=2;
+  villageIn.classList.toggle("invalid",!vOk&&villageIn.value.trim()); villageIn.classList.toggle("valid",vOk);
+  document.getElementById("villageErr").classList.toggle("show",!vOk&&!!villageIn.value.trim());
+  if(!vOk)ok=false;
+  const pOk=/^[6-9]\d{9}$/.test(phoneIn.value.trim());
+  phoneIn.classList.toggle("invalid",!pOk&&phoneIn.value.trim()); phoneIn.classList.toggle("valid",pOk);
+  document.getElementById("phoneErr").classList.toggle("show",!pOk&&!!phoneIn.value.trim());
+  if(!pOk)ok=false;
+  const a=Number(amtIn.value);
+  const aOk=a>=minAmt&&(maxAmt===0||a<=maxAmt);
+  amtIn.classList.toggle("invalid",!aOk&&!!amtIn.value); amtIn.classList.toggle("valid",aOk);
+  let errMsg="Enter a valid amount (min ₹"+minAmt+")";
+  if(maxAmt>0&&a>maxAmt) errMsg="Maximum contribution is ₹"+maxAmt.toLocaleString("en-IN");
+  document.getElementById("amountErr").textContent=errMsg;
+  document.getElementById("amountErr").classList.toggle("show",!aOk&&!!amtIn.value);
+  if(!aOk)ok=false;
+  procBtn.disabled=!ok;
+}
+nameIn.addEventListener("input",validate); villageIn.addEventListener("input",validate);
+phoneIn.addEventListener("input",()=>{phoneIn.value=phoneIn.value.replace(/\D/g,"").slice(0,10);validate()});
+amtIn.addEventListener("input",validate);
+
+// STEPS
+function setStep(n){[1,2,3].forEach(i=>{const e=document.getElementById("step"+i);e.classList.remove("active","done");if(i<n)e.classList.add("done");if(i===n)e.classList.add("active")})}
+function generateRefID(){return "EP"+Date.now().toString().slice(-10)}
+
+// FLOW
+function goToPayment(){
+  userData={refid:generateRefID(),name:nameIn.value.trim(),village:villageIn.value.trim(),phone:phoneIn.value.trim(),amount:amtIn.value.trim()};
+  upiLink=`upi://pay?pa=${upiID}&pn=${encodeURIComponent(userData.name)}&am=${userData.amount}&cu=INR&tn=${userData.refid}`;
+  document.getElementById("formSection").style.display="none";
+  document.getElementById("paymentSection").style.display="block";
+  document.getElementById("amountBadge").textContent="₹"+Number(userData.amount).toLocaleString("en-IN");
+  document.getElementById("qrcode").innerHTML="";
+  try{new QRCode(document.getElementById("qrcode"),{text:upiLink,width:200,height:200})}catch(e){}
+  setStep(2); window.scrollTo({top:0,behavior:"smooth"});
+}
+function backToForm(){document.getElementById("paymentSection").style.display="none";document.getElementById("formSection").style.display="block";setStep(1)}
+function openUPI(app){
+  const links={phonepe:`phonepe://pay?pa=${upiID}&pn=${encodeURIComponent(userData.name)}&am=${userData.amount}&cu=INR&tn=${userData.refid}`,gpay:`tez://upi/pay?pa=${upiID}&pn=${encodeURIComponent(userData.name)}&am=${userData.amount}&cu=INR&tn=${userData.refid}`,paytm:`paytmmp://pay?pa=${upiID}&pn=${encodeURIComponent(userData.name)}&am=${userData.amount}&cu=INR&tn=${userData.refid}`,bhim:upiLink};
+  window.location.href=links[app]||upiLink; setTimeout(()=>window.location.href=upiLink,2000);
+}
+function showMsg(id,type,text){const el=document.getElementById(id);el.className="msg-box show "+type;el.innerHTML=(type==="success"?"✅":type==="error"?"❌":type==="warning"?"⚠️":"ℹ️")+" "+text}
+function showProgress(){const pb=document.getElementById("progressBar"),pf=document.getElementById("progressFill");pb.style.display="block";pf.style.width="0%";setTimeout(()=>pf.style.width="40%",100);setTimeout(()=>pf.style.width="75%",2000)}
+function completeProgress(){document.getElementById("progressFill").style.width="100%";setTimeout(()=>document.getElementById("progressBar").style.display="none",500)}
+
+function finishPayment(){
+  const utr=document.getElementById("utr").value.trim();
+  if(!utr||utr.length<8){showMsg("payMsg","error","Please enter a valid UTR / Transaction ID (min 8 digits).");return}
+  document.getElementById("finishBtn").disabled=true; showProgress();
+  api(EVENT_API,"insertPayment",{refid:userData.refid,name:userData.name,village:userData.village,phone:userData.phone,amount:userData.amount,utr},"POST")
+  .then(res=>{
+    completeProgress(); document.getElementById("finishBtn").disabled=false;
+    if(res.result==="Inserted"){
+      if(res.riskLevel==="MEDIUM") toast("⚠️ Payment submitted for review.","warning");
+      showMsg("payMsg","success","Payment submitted!"); setTimeout(()=>showReceipt(utr),600);
+    } else if(res.result==="DuplicatePhone") showMsg("payMsg","error","This phone number already has a payment record for this event.");
+    else if(res.result==="DuplicateUTR") showMsg("payMsg","error","❌ Duplicate UTR — already submitted.");
+    else if(res.result==="AmountExceedsMax") showMsg("payMsg","error",res.message||"Amount exceeds maximum.");
+    else if(res.result==="AmountBelowMin") showMsg("payMsg","error",res.message||"Amount below minimum.");
+    else showMsg("payMsg","error","Server error. Please try again. "+(res.error||""));
+  }).catch(()=>{completeProgress();document.getElementById("finishBtn").disabled=false;showMsg("payMsg","error","Connection error. Please retry.")});
+}
+
+function showReceipt(utr){
+  document.getElementById("paymentSection").style.display="none";
+  document.getElementById("receiptSection").style.display="block"; setStep(3);
+  const now=new Date();
+  document.getElementById("r_org").textContent=orgName;
+  document.getElementById("r_event").textContent=eventName;
+  document.getElementById("r_name").textContent=userData.name;
+  document.getElementById("r_village").textContent=userData.village;
+  document.getElementById("r_phone").textContent=userData.phone;
+  document.getElementById("r_amount").textContent="₹"+Number(userData.amount).toLocaleString("en-IN");
+  document.getElementById("r_utr").textContent=utr;
+  document.getElementById("r_refid").textContent=userData.refid;
+  document.getElementById("r_datetime").textContent=now.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})+" "+now.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
+  document.getElementById("r_gentime").textContent=now.toLocaleString("en-IN");
+  window.scrollTo({top:0,behavior:"smooth"});
+}
+function downloadReceipt(){
+  html2canvas(document.getElementById("receipt"),{scale:2,backgroundColor:"#fff",useCORS:true}).then(canvas=>{
+    const a=document.createElement("a"); a.download="receipt_"+userData.refid+".png"; a.href=canvas.toDataURL("image/png"); a.click();
+  });
+}
+</script>
+<script>if("serviceWorker"in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));</script>
+</body>
+</html>
