@@ -3,7 +3,7 @@
 // ============================================================
 const EP = {
   // MASTER DB Apps Script URL (reads MASTER_DB spreadsheet)
-  MASTER_URL: "https://script.google.com/macros/s/YOUR_MASTER_SCRIPT_ID/exec",
+  MASTER_URL: "https://script.google.com/macros/s/AKfycbziup2hPqlG3tvQZPnkoaTGxl58f5T5811W6SrppaCFrO_dFJGYHbFZ_Qc3OvEtdEvI/exec",
 
   APP_NAME:  "EventPay",
   APP_VER:   "4.0",
