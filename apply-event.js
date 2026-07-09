@@ -22,6 +22,7 @@
 // doesn't load config.js for some reason, falls back to this constant —
 // replace with your deployed /exec URL either way if it's wrong.
 
+const SCRIPT_URL = APP_CONFIG.SCRIPT_URL;
 
 (function () {
   "use strict";
