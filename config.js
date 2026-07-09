@@ -98,6 +98,71 @@ function setSelectedEvent(eid, sid, ename) {
 }
 
 // ============================================================
+// AUTO-SID INJECTION (THE MULTI-EVENT FIX)
+// ------------------------------------------------------------
+// Root cause of "every page loads the default/Ram&Sita spreadsheet":
+// home.html, donors.html, gallery.html, status.html, invite.html,
+// complaint.html, admin.html and admin-login.html all call the
+// backend with plain fetch(APP_CONFIG.SCRIPT_URL + "?action=...")
+// or fetch(APP_CONFIG.SCRIPT_URL, {method:"POST", body:...}) and
+// NONE of them ever attached "sid". The backend's resolveSid_()
+// was already correct (it checks p.sid first) — it just never
+// received one, so it always fell through to DEFAULT_SPREADSHEET_ID.
+//
+// Rather than hand-edit 30+ scattered fetch() call sites (fragile —
+// one missed spot silently reintroduces this exact bug), every
+// request the app makes to APP_CONFIG.SCRIPT_URL is intercepted
+// here, ONE time, and "sid" is attached automatically from the
+// currently selected event (getEventSID()) if the caller didn't
+// already set one. This makes sid behave like a global header:
+// no page has to remember it, and no future page can forget it.
+//
+// Safe by construction:
+//  - Only touches requests whose URL starts with our own backend URL.
+//  - Never overwrites a sid a caller explicitly set.
+//  - If no event is selected yet (e.g. on index.html before Enter is
+//    clicked), getEventSID() is "" and nothing is injected — actions
+//    like getEvents/searchEvent that read the Master DB are unaffected
+//    since the backend only consults sid for per-event actions.
+// ============================================================
+(function () {
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    try {
+      const isPlainString = typeof input === "string";
+      const urlStr = isPlainString ? input : (input && input.url);
+      if (urlStr && typeof APP_CONFIG !== "undefined" && urlStr.indexOf(APP_CONFIG.SCRIPT_URL) === 0) {
+        const sid = getEventSID();
+        if (sid) {
+          const isPost = init && init.method && String(init.method).toUpperCase() === "POST";
+          if (isPost) {
+            if (init.body instanceof URLSearchParams) {
+              if (!init.body.has("sid")) init.body.append("sid", sid);
+            } else if (typeof init.body === "string") {
+              const bodyParams = new URLSearchParams(init.body);
+              if (!bodyParams.has("sid")) {
+                bodyParams.append("sid", sid);
+                init = Object.assign({}, init, { body: bodyParams.toString() });
+              }
+            }
+          } else {
+            const u = new URL(urlStr, window.location.href);
+            if (!u.searchParams.has("sid")) {
+              u.searchParams.set("sid", sid);
+              input = isPlainString ? u.toString() : new Request(u.toString(), input);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // Never let the sid shim break a request — fall through to the
+      // original call unmodified if anything above goes wrong.
+    }
+    return nativeFetch(input, init);
+  };
+})();
+
+// ============================================================
 // THEME
 // ============================================================
 function initTheme() {
