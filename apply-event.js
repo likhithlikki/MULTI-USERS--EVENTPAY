@@ -5,7 +5,7 @@
    action=/sid= router pattern your MASTER Code.gs (v4.0) already
    uses — the same one index.html calls as EP.MASTER_URL.
 
-   Set APP_CONFIG.SCRIPT_URL below to your deployed Web App /exec URL (same
+   Set SCRIPT_URL below to your deployed Web App /exec URL (same
    one used in config.js as EP.MASTER_URL). This page is hosted on
    GitHub Pages, so google.script.run is never available here —
    only fetch() to the deployed Web App works.
@@ -22,7 +22,7 @@
 // doesn't load config.js for some reason, falls back to this constant —
 // replace with your deployed /exec URL either way if it's wrong.
 
-const SCRIPT_URL = APP_CONFIG.SCRIPT_URL;
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbziup2hPqlG3tvQZPnkoaTGxl58f5T5811W6SrppaCFrO_dFJGYHbFZ_Qc3OvEtdEvI/exec";
 
 (function () {
   "use strict";
@@ -454,7 +454,7 @@ const SCRIPT_URL = APP_CONFIG.SCRIPT_URL;
    * since this page is static (GitHub Pages), not HtmlService.
    */
   function runServer(actionName, params) {
-   if (!APP_CONFIG.SCRIPT_URL) {
+   if (!SCRIPT_URL) {
     return Promise.reject("SCRIPT_URL is not configured.");
 }
 
@@ -464,7 +464,7 @@ const SCRIPT_URL = APP_CONFIG.SCRIPT_URL;
       body.set(key, params[key] === undefined || params[key] === null ? "" : String(params[key]));
     });
 
-  return fetch(APP_CONFIG.SCRIPT_URL, {
+  return fetch(SCRIPT_URL, {
       method: "POST",
       body: body
     })
