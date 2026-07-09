@@ -21,7 +21,11 @@
 // since Apply Event writes into the same MASTER_DB. If apply-event.html
 // doesn't load config.js for some reason, falls back to this constant —
 // replace with your deployed /exec URL either way if it's wrong.
-var WEB_APP_URL = (typeof EP !== "undefined" && EP.MASTER_URL) ? EP.MASTER_URL : "REPLACE_WITH_YOUR_DEPLOYED_WEB_APP_EXEC_URL";
+if (typeof EP === "undefined" || !EP.MASTER_URL) {
+  throw new Error("config.js is missing or EP.MASTER_URL is not configured.");
+}
+
+const WEB_APP_URL = EP.MASTER_URL;
 
 (function () {
   "use strict";
