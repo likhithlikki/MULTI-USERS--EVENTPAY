@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Create Your Event — EventPay</title>
+<link rel="stylesheet" href="apply-event.css">
+</head>
+<body>
+
+<div class="page">
+
+  <header class="topbar">
+    <div class="brand">EventPay</div>
+    <div class="steps-indicator" id="stepsIndicator">
+      <span class="step-dot active" data-step="1">1</span>
+      <span class="step-dot" data-step="2">2</span>
+      <span class="step-dot" data-step="3">3</span>
+      <span class="step-dot" data-step="4">4</span>
+      <span class="step-dot" data-step="5">5</span>
+    </div>
+  </header>
+
+  <main class="card-wrap">
+    <form id="applyForm" novalidate>
+
+      <!-- STEP 1: Organizer Details -->
+      <section class="step-card active" data-step="1">
+        <h2>Organizer Details</h2>
+        <p class="subtitle">Let's start with who's creating this event.</p>
+
+        <label>Organizer Name</label>
+        <input type="text" id="organizerName" required placeholder="Full name">
+
+        <label>Phone Number</label>
+        <input type="tel" id="organizerPhone" required placeholder="10-digit mobile number">
+
+        <label>Email</label>
+        <div class="inline-group">
+          <input type="email" id="organizerEmail" required placeholder="you@example.com">
+          <button type="button" class="btn-secondary" id="sendOtpBtn">Send OTP</button>
+        </div>
+
+        <div id="otpBlock" class="otp-block hidden">
+          <label>Enter 6-digit OTP</label>
+          <div class="inline-group">
+            <input type="text" id="otpInput" maxlength="6" placeholder="000000">
+            <button type="button" class="btn-secondary" id="verifyOtpBtn">Verify</button>
+          </div>
+          <div class="hint" id="otpStatus"></div>
+        </div>
+
+        <div class="nav-row">
+          <span></span>
+          <button type="button" class="btn-primary" data-next>Continue</button>
+        </div>
+      </section>
+
+      <!-- STEP 2: Select Plan -->
+      <section class="step-card" data-step="2">
+        <h2>Select Plan</h2>
+        <p class="subtitle">Pick the plan that fits your event.</p>
+
+        <div class="plan-grid">
+          <label class="plan-card">
+            <input type="radio" name="plan" value="Free">
+            <div class="plan-name">Free</div>
+            <div class="plan-desc">30-day trial, core features</div>
+          </label>
+          <label class="plan-card">
+            <input type="radio" name="plan" value="Premium">
+            <div class="plan-name">Premium</div>
+            <div class="plan-desc">Full features, priority support</div>
+          </label>
+          <label class="plan-card">
+            <input type="radio" name="plan" value="Enterprise">
+            <div class="plan-name">Enterprise</div>
+            <div class="plan-desc">Custom limits, dedicated support</div>
+          </label>
+        </div>
+
+        <div class="nav-row">
+          <button type="button" class="btn-ghost" data-prev>Back</button>
+          <button type="button" class="btn-primary" data-next>Continue</button>
+        </div>
+      </section>
+
+      <!-- STEP 3: Select Event Type -->
+      <section class="step-card" data-step="3">
+        <h2>Select Event Type</h2>
+        <p class="subtitle">What are you celebrating?</p>
+
+        <div class="type-grid" id="eventTypeGrid">
+          <label class="type-card"><input type="radio" name="eventType" value="Marriage"><span>Marriage</span></label>
+          <label class="type-card"><input type="radio" name="eventType" value="Birthday"><span>Birthday</span></label>
+          <label class="type-card"><input type="radio" name="eventType" value="Reception"><span>Reception</span></label>
+          <label class="type-card"><input type="radio" name="eventType" value="Engagement"><span>Engagement</span></label>
+          <label class="type-card"><input type="radio" name="eventType" value="Anniversary"><span>Anniversary</span></label>
+          <label class="type-card"><input type="radio" name="eventType" value="Baby Shower"><span>Baby Shower</span></label>
+          <label class="type-card"><input type="radio" name="eventType" value="House Warming"><span>House Warming</span></label>
+          <label class="type-card"><input type="radio" name="eventType" value="Temple Festival"><span>Temple Festival</span></label>
+          <label class="type-card"><input type="radio" name="eventType" value="Corporate Event"><span>Corporate Event</span></label>
+          <label class="type-card"><input type="radio" name="eventType" value="Other"><span>Other</span></label>
+        </div>
+
+        <div class="nav-row">
+          <button type="button" class="btn-ghost" data-prev>Back</button>
+          <button type="button" class="btn-primary" data-next>Continue</button>
+        </div>
+      </section>
+
+      <!-- STEP 4: Dynamic Form + Common Details -->
+      <section class="step-card" data-step="4">
+        <h2>Event Details</h2>
+        <p class="subtitle">Tell us more about the event.</p>
+
+        <div id="dynamicFields"></div>
+
+        <div class="divider"></div>
+
+        <label>Event Date</label>
+        <input type="date" id="eventDate" required>
+
+        <label>Event Time</label>
+        <input type="time" id="eventTime" required>
+
+        <label>Venue</label>
+        <input type="text" id="venue" required placeholder="Venue name / address">
+
+        <label>Google Maps Link</label>
+        <input type="url" id="mapsLink" placeholder="https://maps.google.com/...">
+
+        <label>Expected Guests</label>
+        <input type="number" id="expectedGuests" min="1" placeholder="e.g. 200">
+
+        <label>UPI ID</label>
+        <input type="text" id="upiId" placeholder="yourupi@bank">
+
+        <label>Description</label>
+        <textarea id="description" rows="3" placeholder="Short description for guests"></textarea>
+
+        <div class="divider"></div>
+
+        <label>Google Spreadsheet Link</label>
+        <input type="url" id="spreadsheetLink" required placeholder="https://docs.google.com/spreadsheets/d/.../edit">
+        <div class="hint">Create a blank Google Sheet, share it, and paste the link here. We'll set everything up automatically.</div>
+
+        <label class="checkbox-row">
+          <input type="checkbox" id="termsCheck">
+          I accept the <a href="/terms" target="_blank">Terms &amp; Conditions</a>
+        </label>
+        <label class="checkbox-row">
+          <input type="checkbox" id="privacyCheck">
+          I accept the <a href="/privacy" target="_blank">Privacy Policy</a>
+        </label>
+
+        <div id="duplicateWarning" class="warning-box hidden"></div>
+
+        <div class="nav-row">
+          <button type="button" class="btn-ghost" data-prev>Back</button>
+          <button type="submit" class="btn-primary" id="submitBtn">Create Event</button>
+        </div>
+      </section>
+
+      <!-- STEP 5: Success -->
+      <section class="step-card" data-step="5">
+        <div class="success-icon">✓</div>
+        <h2>Congratulations!</h2>
+        <p class="subtitle">Event Created Successfully</p>
+
+        <div class="result-grid" id="resultGrid"></div>
+
+        <div class="button-row">
+          <button type="button" class="btn-secondary" id="copyCodeBtn">Copy Event Code</button>
+          <button type="button" class="btn-secondary" id="copyPublicBtn">Copy Public URL</button>
+          <button type="button" class="btn-secondary" id="copyAdminBtn">Copy Admin URL</button>
+        </div>
+        <div class="button-row">
+          <a class="btn-primary" id="openSheetBtn" target="_blank">Open Spreadsheet</a>
+          <a class="btn-primary" id="openEventBtn" target="_blank">Open Event</a>
+          <a class="btn-primary" id="openAdminBtn" target="_blank">Open Admin</a>
+        </div>
+      </section>
+
+    </form>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+  <div id="loadingOverlay" class="loading-overlay hidden">
+    <div class="spinner"></div>
+    <div id="loadingText">Setting up your event…</div>
+  </div>
+
+</div>
+
+<script src="apply-event.js"></script>
+</body>
+</html>
