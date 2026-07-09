@@ -302,7 +302,11 @@ function selectEvent(e, evEncoded) {
   const scriptUrl = ev.ScriptURL || ev.ApiUrl || (MASTER_API + "&sid=" + encodeURIComponent(ev.SpreadsheetID || ""));
 
   const ename = ev.EventName || "Event";
-  setSelectedEvent(ev.EventID || ev.EventCode, scriptUrl, ename);
+setSelectedEvent(
+    ev.EventID || ev.EventCode,
+    ev.SpreadsheetID,
+    ename
+);
 
   // Store full event info for home page
   sessionStorage.setItem("ep_event_obj", JSON.stringify(ev));
