@@ -21,9 +21,7 @@
 // since Apply Event writes into the same MASTER_DB. If apply-event.html
 // doesn't load config.js for some reason, falls back to this constant —
 // replace with your deployed /exec URL either way if it's wrong.
-if (typeof APP_CONFIG === "undefined" || !APP_CONFIG.SCRIPT_URL) {
-    throw new Error("config.js was not loaded or APP_CONFIG.SCRIPT_URL is missing.");
-}
+
 
 (function () {
   "use strict";
