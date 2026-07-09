@@ -1,6 +1,5 @@
 
 
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbziup2hPqlG3tvQZPnkoaTGxl58f5T5811W6SrppaCFrO_dFJGYHbFZ_Qc3OvEtdEvI/exec";
 
 (function () {
   "use strict";
@@ -432,7 +431,7 @@ const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbziup2hPqlG3tvQZPnko
    * since this page is static (GitHub Pages), not HtmlService.
    */
   function runServer(actionName, params) {
-   if (!SCRIPT_URL) {
+if (!APP_CONFIG.SCRIPT_URL) {
     return Promise.reject("SCRIPT_URL is not configured.");
 }
 
@@ -442,7 +441,7 @@ const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbziup2hPqlG3tvQZPnko
       body.set(key, params[key] === undefined || params[key] === null ? "" : String(params[key]));
     });
 
-  return fetch(SCRIPT_URL, {
+return fetch(APP_CONFIG.SCRIPT_URL, {
       method: "POST",
       body: body
     })
