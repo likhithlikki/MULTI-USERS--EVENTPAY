@@ -1,26 +1,4 @@
-/* ============================================================
-   apply-event.js
-   ============================================================
-   Talks to your Apps Script Web App via fetch(), matching the
-   action=/sid= router pattern your MASTER Code.gs (v4.0) already
-   uses — the same one index.html calls as EP.MASTER_URL.
 
-   Set SCRIPT_URL below to your deployed Web App /exec URL (same
-   one used in config.js as EP.MASTER_URL). This page is hosted on
-   GitHub Pages, so google.script.run is never available here —
-   only fetch() to the deployed Web App works.
-
-   Backend side: ApplyEvent.gs must be included in the SAME Apps
-   Script project as your MASTER Code.gs, and its four actions
-   (sendOrganizerOtp, verifyOrganizerOtp, checkDuplicateEvent,
-   submitEventApplication) must be added to handleAction() — see
-   the router snippet at the top of ApplyEvent.gs.
-   ============================================================ */
-
-// Reuses the same Web App URL as index.html's EP.MASTER_URL (config.js),
-// since Apply Event writes into the same MASTER_DB. If apply-event.html
-// doesn't load config.js for some reason, falls back to this constant —
-// replace with your deployed /exec URL either way if it's wrong.
 
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbziup2hPqlG3tvQZPnkoaTGxl58f5T5811W6SrppaCFrO_dFJGYHbFZ_Qc3OvEtdEvI/exec";
 
