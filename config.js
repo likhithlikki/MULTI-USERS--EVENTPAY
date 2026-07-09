@@ -4,9 +4,7 @@
 
 const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbziup2hPqlG3tvQZPnkoaTGxl58f5T5811W6SrppaCFrO_dFJGYHbFZ_Qc3OvEtdEvI/exec";
 
-const EP = {
-  // MASTER DB Apps Script URL
-  MASTER_URL: WEB_APP_URL,
+
 
   APP_NAME: "EventPay",
   APP_VER: "4.0",
