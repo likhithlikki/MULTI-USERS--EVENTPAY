@@ -5,7 +5,7 @@
    action=/sid= router pattern your MASTER Code.gs (v4.0) already
    uses — the same one index.html calls as EP.MASTER_URL.
 
-   Set WEB_APP_URL below to your deployed Web App /exec URL (same
+   Set APP_CONFIG.SCRIPT_URL below to your deployed Web App /exec URL (same
    one used in config.js as EP.MASTER_URL). This page is hosted on
    GitHub Pages, so google.script.run is never available here —
    only fetch() to the deployed Web App works.
@@ -21,8 +21,8 @@
 // since Apply Event writes into the same MASTER_DB. If apply-event.html
 // doesn't load config.js for some reason, falls back to this constant —
 // replace with your deployed /exec URL either way if it's wrong.
-if (typeof WEB_APP_URL === "undefined" || !WEB_APP_URL) {
-    return Promise.reject("config.js is missing or WEB_APP_URL is empty.");
+if (typeof APP_CONFIG === "undefined" || !APP_CONFIG.SCRIPT_URL) {
+    throw new Error("config.js was not loaded or APP_CONFIG.SCRIPT_URL is missing.");
 }
 
 (function () {
@@ -455,9 +455,9 @@ if (typeof WEB_APP_URL === "undefined" || !WEB_APP_URL) {
    * since this page is static (GitHub Pages), not HtmlService.
    */
   function runServer(actionName, params) {
-    if (!WEB_APP_URL || WEB_APP_URL.indexOf("REPLACE_WITH") === 0) {
-      return Promise.reject("WEB_APP_URL is not configured in apply-event.js.");
-    }
+   if (!APP_CONFIG.SCRIPT_URL) {
+    return Promise.reject("SCRIPT_URL is not configured.");
+}
 
     var body = new URLSearchParams();
     body.set("action", actionName);
@@ -465,7 +465,7 @@ if (typeof WEB_APP_URL === "undefined" || !WEB_APP_URL) {
       body.set(key, params[key] === undefined || params[key] === null ? "" : String(params[key]));
     });
 
-    return fetch(WEB_APP_URL, {
+  return fetch(APP_CONFIG.SCRIPT_URL, {
       method: "POST",
       body: body
     })
