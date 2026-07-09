@@ -1,10 +1,12 @@
 // ============================================================
 // EventPay Multi-Event — config.js
+// SINGLE SOURCE OF CONFIG. This is the ONLY file that may define
+// the Apps Script Web App URL. No other file should declare
+// WEB_APP_URL, MASTER_URL, EP.MASTER_URL, or any second URL.
 // ============================================================
 
 const APP_CONFIG = {
   SCRIPT_URL: "https://script.google.com/macros/s/AKfycbziup2hPqlG3tvQZPnkoaTGxl58f5T5811W6SrppaCFrO_dFJGYHbFZ_Qc3OvEtdEvI/exec",
-
 
   APP_NAME: "EventPay",
   APP_VER: "4.0",
@@ -12,61 +14,94 @@ const APP_CONFIG = {
 
   // LocalStorage keys
   LS: {
-    THEME:        "ep_theme",
-    SELECTED_EID: "ep_selected_eid",    // selected event ID
-    SELECTED_EURL:"ep_selected_eurl",   // selected event API URL
-    SELECTED_ENAME:"ep_selected_ename", // selected event name
-    ADMIN_TOKEN:  "ep_admin_token",
-    ADMIN_EXPIRY: "ep_admin_expiry",
-    ADMIN_USER:   "ep_admin_user",
-    ADMIN_ROLE:   "ep_admin_role",
+    THEME:          "ep_theme",
+    SELECTED_EID:   "ep_selected_eid",    // selected event ID
+    SELECTED_EURL:  "ep_selected_eurl",   // NOTE: name kept for backward-compat with older
+                                           // pages, but this now stores the event's
+                                           // Spreadsheet ID ("sid"), not a second URL.
+    SELECTED_ENAME: "ep_selected_ename",
+    ADMIN_TOKEN:    "ep_admin_token",
+    ADMIN_EXPIRY:   "ep_admin_expiry",
+    ADMIN_USER:     "ep_admin_user",
+    ADMIN_ROLE:     "ep_admin_role",
   },
 
   QUICK_AMTS: [101, 251, 501, 1001, 2001, 5001],
 };
 
+// Backward-compat alias only — NOT a second config object. `EP` and
+// `APP_CONFIG` point at the exact same object in memory. This exists
+// solely so any not-yet-updated page that still references `EP.*`
+// doesn't crash with "EP is not defined". Every value still lives in
+// APP_CONFIG; nothing is duplicated.
+const EP = APP_CONFIG;
+
 // ============================================================
 // API CALL HELPER
-// url can be MASTER_URL or a per-event script URL
+// Always calls APP_CONFIG.SCRIPT_URL — the ONLY Web App URL in the
+// project. Supports both call styles so pages that haven't been
+// touched yet keep working without edits:
+//   api(action, params, method)              <- new/preferred
+//   api(anyUrlArgumentIgnored, action, params, method)  <- legacy shape
+// Any URL passed as the first legacy argument is ignored; there is
+// only one endpoint now.
 // ============================================================
-async function api(url, action, params = {}, method = "GET") {
+async function api(a, b, c, d) {
+  let action, params, method;
+  if (typeof b === "string") {
+    // legacy shape: api(url, action, params, method) — url ignored
+    action = b; params = c || {}; method = d || "GET";
+  } else {
+    // new shape: api(action, params, method)
+    action = a; params = b || {}; method = c || "GET";
+  }
+
   try {
     if (method === "GET") {
-      const u = new URL(url);
+      const u = new URL(APP_CONFIG.SCRIPT_URL);
       u.searchParams.set("action", action);
       Object.entries(params).forEach(([k, v]) => u.searchParams.set(k, String(v)));
       const r = await fetch(u.toString());
       return r.json();
     } else {
       const body = new URLSearchParams({ action, ...params });
-      const r = await fetch(url, { method: "POST", body });
+      const r = await fetch(APP_CONFIG.SCRIPT_URL, { method: "POST", body });
       return r.json();
     }
-  } catch(e) {
+  } catch (e) {
     return { error: e.message };
   }
 }
 
-// Get current event API URL from sessionStorage/localStorage
+// Legacy name kept for compatibility with older pages that call
+// api(getEventAPI(), "action", {...}) expecting a URL back.
+// There is only one URL now, so this just returns it.
 function getEventAPI() {
-  return sessionStorage.getItem(EP.LS.SELECTED_EURL) ||
-         localStorage.getItem(EP.LS.SELECTED_EURL) || "";
+  return APP_CONFIG.SCRIPT_URL;
 }
 
-function setSelectedEvent(eid, apiUrl, ename) {
-  sessionStorage.setItem(EP.LS.SELECTED_EID, eid);
-  sessionStorage.setItem(EP.LS.SELECTED_EURL, apiUrl);
-  sessionStorage.setItem(EP.LS.SELECTED_ENAME, ename);
-  localStorage.setItem(EP.LS.SELECTED_EID, eid);
-  localStorage.setItem(EP.LS.SELECTED_EURL, apiUrl);
-  localStorage.setItem(EP.LS.SELECTED_ENAME, ename);
+// Current event's Spreadsheet ID ("sid") — pass this as params.sid
+// (or params.eventCode, both are accepted by the backend) on every
+// per-event API call.
+function getEventSID() {
+  return sessionStorage.getItem(APP_CONFIG.LS.SELECTED_EURL) ||
+         localStorage.getItem(APP_CONFIG.LS.SELECTED_EURL) || "";
+}
+
+function setSelectedEvent(eid, sid, ename) {
+  sessionStorage.setItem(APP_CONFIG.LS.SELECTED_EID, eid);
+  sessionStorage.setItem(APP_CONFIG.LS.SELECTED_EURL, sid);
+  sessionStorage.setItem(APP_CONFIG.LS.SELECTED_ENAME, ename);
+  localStorage.setItem(APP_CONFIG.LS.SELECTED_EID, eid);
+  localStorage.setItem(APP_CONFIG.LS.SELECTED_EURL, sid);
+  localStorage.setItem(APP_CONFIG.LS.SELECTED_ENAME, ename);
 }
 
 // ============================================================
 // THEME
 // ============================================================
 function initTheme() {
-  const t = localStorage.getItem(EP.LS.THEME) || "dark";
+  const t = localStorage.getItem(APP_CONFIG.LS.THEME) || "dark";
   document.documentElement.setAttribute("data-theme", t);
   const btn = document.getElementById("themeBtn");
   if (btn) btn.textContent = t === "dark" ? "☀️" : "🌙";
@@ -75,7 +110,7 @@ function toggleTheme() {
   const cur = document.documentElement.getAttribute("data-theme") || "dark";
   const next = cur === "dark" ? "light" : "dark";
   document.documentElement.setAttribute("data-theme", next);
-  localStorage.setItem(EP.LS.THEME, next);
+  localStorage.setItem(APP_CONFIG.LS.THEME, next);
   const btn = document.getElementById("themeBtn");
   if (btn) btn.textContent = next === "dark" ? "☀️" : "🌙";
 }
@@ -117,8 +152,8 @@ function toggleMobileMenu() {
 // GUARD — redirect if no event selected
 // ============================================================
 function requireEvent() {
-  const url = getEventAPI();
-  if (!url) {
+  const sid = getEventSID();
+  if (!sid) {
     window.location.href = "index.html";
     return false;
   }
