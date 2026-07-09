@@ -1,18 +1,27 @@
 /* ============================================================
    apply-event.js
    ============================================================
-   Talks to your Apps Script Web App via google.script.run.
+   Talks to your Apps Script Web App via fetch(), matching the
+   action=/sid= router pattern your MASTER Code.gs (v4.0) already
+   uses — the same one index.html calls as EP.MASTER_URL.
 
-   ASSUMPTION: this page is served from the Apps Script Web App
-   itself (HtmlService), which is what makes google.script.run
-   available. If instead this page is hosted purely on GitHub
-   Pages and calls a *deployed* Web App URL, replace every
-   google.script.run(...) block below with a fetch() call to
-   your Web App's doPost/doGet endpoint and adjust accordingly —
-   I don't know which hosting model your existing Home/Admin
-   pages use, so this file assumes the HtmlService pattern since
-   that's the more common Apps Script setup.
+   Set WEB_APP_URL below to your deployed Web App /exec URL (same
+   one used in config.js as EP.MASTER_URL). This page is hosted on
+   GitHub Pages, so google.script.run is never available here —
+   only fetch() to the deployed Web App works.
+
+   Backend side: ApplyEvent.gs must be included in the SAME Apps
+   Script project as your MASTER Code.gs, and its four actions
+   (sendOrganizerOtp, verifyOrganizerOtp, checkDuplicateEvent,
+   submitEventApplication) must be added to handleAction() — see
+   the router snippet at the top of ApplyEvent.gs.
    ============================================================ */
+
+// Reuses the same Web App URL as index.html's EP.MASTER_URL (config.js),
+// since Apply Event writes into the same MASTER_DB. If apply-event.html
+// doesn't load config.js for some reason, falls back to this constant —
+// replace with your deployed /exec URL either way if it's wrong.
+var WEB_APP_URL = (typeof EP !== "undefined" && EP.MASTER_URL) ? EP.MASTER_URL : "REPLACE_WITH_YOUR_DEPLOYED_WEB_APP_EXEC_URL";
 
 (function () {
   "use strict";
@@ -155,7 +164,7 @@
       }
 
       setLoading(true, "Sending OTP…");
-      runServer("sendOrganizerOtp", [email])
+      runServer("sendOrganizerOtp", { email: email })
         .then(function (res) {
           setLoading(false);
           if (res.success) {
@@ -181,7 +190,7 @@
       }
 
       setLoading(true, "Verifying…");
-      runServer("verifyOrganizerOtp", [email, otp])
+      runServer("verifyOrganizerOtp", { email: email, otp: otp })
         .then(function (res) {
           setLoading(false);
           if (res.success) {
@@ -303,7 +312,11 @@
   function submitForm(formData) {
     setLoading(true, "Checking for duplicates…");
 
-    runServer("checkDuplicateEvent", [formData.organizerEmail, formData.eventDate, formData.autoEventName])
+    runServer("checkDuplicateEvent", {
+      organizerEmail: formData.organizerEmail,
+      eventDate: formData.eventDate,
+      eventName: formData.autoEventName
+    })
       .then(function (dupRes) {
         if (dupRes.duplicate && !state.duplicateAcknowledged) {
           setLoading(false);
@@ -315,7 +328,7 @@
         }
 
         setLoading(true, "Creating your event & spreadsheet…");
-        return runServer("submitEventApplication", [formData]).then(function (res) {
+        return runServer("submitEventApplication", { formData: JSON.stringify(formData) }).then(function (res) {
           setLoading(false);
           if (res.success) {
             showResult(res);
@@ -429,22 +442,47 @@
   }
 
   /**
-   * Wraps google.script.run in a Promise. Assumes this page is
-   * served via HtmlService from the same Apps Script project that
-   * defines sendOrganizerOtp / verifyOrganizerOtp / checkDuplicateEvent
-   * / submitEventApplication (see ApplyEvent.gs).
+   * POSTs { action, ...params } as form-encoded data to your deployed
+   * Web App, matching the doPost(e)/handleAction(action, p, pd, sid)
+   * pattern already used by your MASTER Code.gs. No "sid" is sent —
+   * these four actions all operate on MASTER_DB directly.
+   *
+   * Your backend's handleAction() must route these action names to
+   * the wrapper functions in ApplyEvent.gs (see the router snippet at
+   * the top of that file) — this is a fetch(), not google.script.run,
+   * since this page is static (GitHub Pages), not HtmlService.
    */
-  function runServer(fnName, args) {
-    return new Promise(function (resolve, reject) {
-      if (typeof google === "undefined" || !google.script || !google.script.run) {
-        reject("google.script.run is not available — this page must be served via HtmlService, or you need to swap in fetch() calls to your Web App URL.");
-        return;
-      }
-      google.script.run
-        .withSuccessHandler(resolve)
-        .withFailureHandler(function (err) { reject(err.message || err); })
-        [fnName].apply(null, args);
+  function runServer(actionName, params) {
+    if (!WEB_APP_URL || WEB_APP_URL.indexOf("REPLACE_WITH") === 0) {
+      return Promise.reject("WEB_APP_URL is not configured in apply-event.js.");
+    }
+
+    var body = new URLSearchParams();
+    body.set("action", actionName);
+    Object.keys(params || {}).forEach(function (key) {
+      body.set(key, params[key] === undefined || params[key] === null ? "" : String(params[key]));
     });
+
+    return fetch(WEB_APP_URL, {
+      method: "POST",
+      body: body
+    })
+      .then(function (response) {
+        if (!response.ok) {
+          throw new Error("Server responded with status " + response.status);
+        }
+        return response.json();
+      })
+      .then(function (json) {
+        // Your router returns raw objects (e.g. {success:true,...} or
+        // {error:"..."}) rather than a uniform envelope, so pass through
+        // as-is but normalize the { error: "..." } shape to what this
+        // page expects ({ success:false, message:"..." }).
+        if (json && json.error && json.success === undefined) {
+          return { success: false, message: json.error };
+        }
+        return json;
+      });
   }
 
 })();
