@@ -108,7 +108,7 @@
 <nav class="navbar">
   <div class="nav-logo" id="navEventName">EventPay</div>
   <div class="nav-links">
-    <a href="index.html" class="nav-link">Home</a>
+    <a href="home.html" class="nav-link">Home</a>
     <a href="invite.html" class="nav-link active">Invitation</a>
     <a href="status.html" class="nav-link">Status</a>
     <a href="complaint.html" class="nav-link">Complaint</a>
@@ -117,7 +117,7 @@
   <button class="hamburger" onclick="toggleNav()">☰</button>
 </nav>
 <div class="nav-mobile" id="navMobile">
-  <a href="index.html">🏠 Home</a>
+  <a href="home.html">🏠 Home</a>
   <a href="invite.html">💌 Invitation</a>
   <a href="gallery.html">📸 Gallery</a>
   <a href="donors.html">👥 Donors</a>
@@ -131,7 +131,7 @@
     <div style="font-size:64px;margin-bottom:20px">🔒</div>
     <h2 style="font-size:22px;font-weight:800;margin-bottom:10px;color:var(--text-muted)">Not Available</h2>
     <p style="color:var(--text-dim);font-size:14px">The invitation is not available yet. Please check back later.</p>
-    <a href="index.html" class="btn-primary" style="display:inline-flex;text-decoration:none;margin-top:24px">← Back to Home</a>
+    <a href="home.html" class="btn-primary" style="display:inline-flex;text-decoration:none;margin-top:24px">← Back to Home</a>
   </div>
 </div>
 
@@ -172,6 +172,13 @@
           <div class="invite-detail-content">
             <div class="invite-detail-label">Venue</div>
             <div class="invite-detail-value" id="inviteVenue">—</div>
+          </div>
+        </div>
+        <div class="invite-detail" id="inviteOrganizerRow" style="display:none">
+          <div class="invite-detail-icon">🙏</div>
+          <div class="invite-detail-content">
+            <div class="invite-detail-label">Organizer</div>
+            <div class="invite-detail-value" id="inviteOrganizer">—</div>
           </div>
         </div>
         <div class="invite-detail">
@@ -229,7 +236,7 @@
     </div>
 
     <div style="text-align:center;margin-top:8px">
-      <a href="index.html" class="btn-primary" style="display:inline-flex;text-decoration:none">💰 Make a Contribution</a>
+      <a href="home.html" class="btn-primary" style="display:inline-flex;text-decoration:none">💰 Make a Contribution</a>
     </div>
   </div>
 </div>
@@ -239,10 +246,12 @@
 
 <script src="config.js"></script>
 <script>
+if (!requireEvent()) { /* redirected — no event selected */ }
+
 const pageURL = window.location.origin + window.location.pathname.replace('invite.html','index.html');
 
 Promise.all([
-  fetch(APP_CONFIG.SCRIPT_URL+"?action=getSettings").then(r=>r.json()).catch(()=>({})),
+  getEventSettingsCached().catch(()=>({})),
   fetch(APP_CONFIG.SCRIPT_URL+"?action=getPublicVisibility").then(r=>r.json()).catch(()=>({showInviteCard:true}))
 ]).then(([s, vis])=>{
   document.getElementById("loadingSkeleton").style.display="none";
@@ -254,10 +263,16 @@ Promise.all([
 
   document.getElementById("mainContent").style.display="block";
 
-  const eventName=s.EventName||APP_CONFIG.EVENT_NAME||"Event";
+  // These keys match what the Event Spreadsheet's Settings sheet
+  // actually stores (getSettings() on the backend aliases "Event Name"
+  // <-> "EventName", "ORG_NAME" <-> "OrganizerName", and
+  // "INVITATION_CARD_DRIVE_LINK" <-> "InviteCardURL", so either spelling
+  // works, but we read the canonical ones here for clarity).
+  const eventName=s.EventName||"Event";
   const eventDate=s.EventDate||""; const eventTime=s.EventTime||"";
   const venueAddr=s.VenueAddress||""; const venueMap=s.VenueMapLink||"";
-  const inviteURL=s.InviteCardURL||""; const orgName=APP_CONFIG.ORG_NAME||"";
+  const inviteURL=s.INVITATION_CARD_DRIVE_LINK||s.InviteCardURL||"";
+  const orgName=s.ORG_NAME||s.OrganizerName||"";
 
   // Update nav + title
   document.getElementById("navEventName").textContent=eventName;
@@ -300,6 +315,12 @@ if (eventDate || eventTime) {
   if(venueAddr){
     document.getElementById("inviteVenueRow").style.display="flex";
     document.getElementById("inviteVenue").textContent=venueAddr;
+  }
+
+  // Organizer
+  if(orgName){
+    document.getElementById("inviteOrganizerRow").style.display="flex";
+    document.getElementById("inviteOrganizer").textContent=orgName;
   }
 
   // Invitation Card Image / PDF
