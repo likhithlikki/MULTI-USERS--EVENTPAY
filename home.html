@@ -325,11 +325,12 @@
 // HOME.HTML — Per-event contribution page
 // Reads event from sessionStorage/localStorage set by index.html
 // ============================================================
-
+  const EVENT_API = APP_CONFIG.SCRIPT_URL;
 
   
   
 if (!requireEvent()) {
+
     window.location.href = "index.html";
 }
 console.log("EVENT SID =", getEventSID());
@@ -347,7 +348,7 @@ console.log("Selected Event");
 console.log(CURRENT_EVENT);
 
 
-const EVENT_API = getEventScriptUrl();
+
 let eventObj  = {};
 try {
   eventObj = JSON.parse(sessionStorage.getItem("ep_event_obj") || localStorage.getItem("ep_event_obj") || "{}");
