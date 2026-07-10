@@ -336,7 +336,7 @@ if (!requireEvent()) {
 console.log("EVENT SID =", getEventSID());
 console.log("EVENT API =", EVENT_API);
 console.log("CACHE =", getCachedEventData());
-console.log("SETTINGS =", getCachedEventSettings());
+
 
 const CURRENT_EVENT = {
     eid: sessionStorage.getItem(APP_CONFIG.LS.SELECTED_EID),
@@ -395,79 +395,32 @@ if (cache) {
     console.log("🌐 Loading Home from server");
 }
 
-Promise.all([
-    getEventSettingsCached().catch(() => ({})),
-    cache
-        ? Promise.resolve(cache.visibility)
-        : api(EVENT_API, "getPublicVisibility").catch(() => ({})),
-    cache
-        ? Promise.resolve(cache.stats)
-        : api(EVENT_API, "getPublicStats").catch(() => ({ total:0, count:0 })),
-    cache
-        ? Promise.resolve({ villages: cache.villages })
-        : api(EVENT_API, "getVillageSuggestions").catch(() => ({ villages:[] })),
-    cache
-        ? Promise.resolve({ transactions: cache.transactions })
-        : api(EVENT_API, "getRecentTransactions").catch(() => ({ transactions:[] }))
-]).then(([settings, vis, stats, vsug, rtx]) => {
 
-  saveCachedEventData({
-    visibility: vis,
-    stats: stats,
-    villages: vsug.villages || [],
-    transactions: rtx.transactions || []
-});
+  (async () => {
 
-  upiID     = settings.UPI_ID || eventObj.UpiID || "";
-  eventName = settings.EventName || eventObj.EventName || "Event";
-  orgName   = settings.OrganizerName || settings.ORG_NAME || eventObj.OrganizerName || "Organisation";
-  minAmt    = parseFloat(settings.MIN_AMOUNT)||50;
-  maxAmt    = parseFloat(settings.MAX_AMOUNT)||0;
+console.log("===== DEBUG START =====");
 
-  document.getElementById("eventTitle").textContent    = eventName;
-  document.getElementById("navEventName").textContent  = eventName;
-  document.title = eventName + " — Contribute";
+console.log("1 Settings");
+console.log(await getEventSettingsCached());
 
-  // Couple names
-  const bride  = settings.BrideName  || eventObj.BrideName  || "";
-  const groom  = settings.GroomName  || eventObj.GroomName  || "";
-  if (bride && groom) document.getElementById("coupleNames").textContent = groom+" 💍 "+bride;
-  else if (bride || groom) document.getElementById("coupleNames").textContent = bride||groom;
+console.log("2 Visibility");
+console.log(await api(EVENT_API,"getPublicVisibility"));
 
-  // Visibility
-  if (vis.showStatistics !== false) {
-    document.getElementById("counterSection").style.display="block";
-    document.getElementById("totalAmount").textContent="₹"+Number(stats.total||0).toLocaleString("en-IN");
-    document.getElementById("totalCount").textContent=Number(stats.count||0).toLocaleString("en-IN");
-  }
-  const showD = vis.showDonorList!==false;
-  const showG = vis.showGallery!==false;
-  const showI = vis.showInviteCard!==false;
-  ["qaaDonors","navDonors","mobNavDonors"].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=showD?"":"none"});
-  ["qaaGallery","navGallery","mobNavGallery"].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=showG?"":"none"});
-  ["qaaInvite","mobNavInvite"].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=showI?"":"none"});
+console.log("3 Stats");
+console.log(await api(EVENT_API,"getPublicStats"));
 
-  // Amount input
-  if (maxAmt>0) document.getElementById("amount").max=maxAmt;
-  document.getElementById("amount").min=minAmt;
-  document.getElementById("amount").placeholder="Minimum ₹"+minAmt;
+console.log("4 Villages");
+console.log(await api(EVENT_API,"getVillageSuggestions"));
 
-  // Villages
-  villages = vsug.villages||[];
+console.log("5 Transactions");
+console.log(await api(EVENT_API,"getRecentTransactions"));
 
-  // Recent transactions
-  const txs = (rtx.transactions||[]).slice(0,5);
-  if (vis.showRecentPayments!==false && txs.length) {
-    document.getElementById("recentSection").style.display="block";
-    document.getElementById("recentList").innerHTML=txs.map(t=>`
-      <div class="rtx-item">
-        <div><div class="rtx-name">${sanitize(t.name)}</div><div class="rtx-village">📍 ${sanitize(t.village||"")}</div></div>
-        <div style="text-align:right"><div class="rtx-amount">${fmtINR(t.amount)}</div><div class="rtx-date">${t.date||""}</div></div>
-      </div>`).join("");
-  }
-}).catch(e=>{
-  toast("Could not load event data. Check API connection.","error");
-  console.error(e);
+console.log("===== DEBUG END =====");
+
+})();
+
+  
+
 });
 
 // VILLAGE AUTOCOMPLETE
