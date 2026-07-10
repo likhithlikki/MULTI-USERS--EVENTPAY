@@ -465,8 +465,6 @@ document.addEventListener("DOMContentLoaded", initTheme);
 
 
 
-const EVENT_CACHE_KEY = "ep_event_cache";
-
 function getCachedEventData() {
     try {
         const data = JSON.parse(sessionStorage.getItem(EVENT_CACHE_KEY) || "{}");
