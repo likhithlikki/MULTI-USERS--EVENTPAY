@@ -372,7 +372,13 @@ async function selectEvent(e, evEncoded) {
   // Store full event info for home page (unrelated to the sid/settings
   // cache — this is just the registry row for display purposes).
   await resetEventPayCache();
+    setSelectedEvent(eid, sid, ename);
   sessionStorage.setItem("ep_event_obj", JSON.stringify(ev));
+  sessionStorage.setItem(
+    "ep_event_cache_time",
+    Date.now()
+);
+
 
   const overlay = document.getElementById("eventLoadOverlay");
   const label = document.getElementById("eventLoadLabel");
@@ -392,7 +398,10 @@ async function selectEvent(e, evEncoded) {
     // proceed to home.html rather than stranding the user on this page.
   }
 
+  sessionStorage.setItem("ep_loading", "true");
+  sessionStorage.removeItem("ep_loading");
   window.location.href = "home.html";
+  
 }
   document.getElementById("refreshEventsBtn").onclick = async () => {
 
