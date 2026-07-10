@@ -155,7 +155,7 @@
 <nav class="navbar">
   <div class="nav-logo" id="navEventName">EventPay</div>
   <div class="nav-links">
-    <a href="index.html" class="nav-link">Home</a>
+    <a href="home.html" class="nav-link">Home</a>
     <a href="gallery.html" class="nav-link active">Gallery</a>
     <a href="invite.html" class="nav-link">Invitation</a>
     <a href="status.html" class="nav-link">Status</a>
@@ -164,7 +164,7 @@
   <button class="hamburger" onclick="toggleNav()">☰</button>
 </nav>
 <div class="nav-mobile" id="navMobile">
-  <a href="index.html">🏠 Home</a>
+  <a href="home.html">🏠 Home</a>
   <a href="gallery.html">📸 Gallery</a>
   <a href="invite.html">💌 Invitation</a>
   <a href="donors.html">👥 Donors</a>
@@ -178,7 +178,7 @@
     <div style="font-size:64px;margin-bottom:20px">📸</div>
     <h2 style="font-size:22px;font-weight:800;margin-bottom:10px;color:var(--text-muted)">Gallery Coming Soon</h2>
     <p style="color:var(--text-dim);font-size:14px">The photo gallery is not available yet. Please check back soon.</p>
-    <a href="index.html" class="btn-primary" style="display:inline-flex;text-decoration:none;margin-top:24px">← Back to Home</a>
+    <a href="home.html" class="btn-primary" style="display:inline-flex;text-decoration:none;margin-top:24px">← Back to Home</a>
   </div>
 </div>
 
@@ -237,14 +237,26 @@
 
 <script src="config.js"></script>
 <script>
+if (!requireEvent()) { /* redirected — no event selected */ }
+
 let allSections = {}, flatImages = [], currentIdx = 0, visibility = {};
 
+// Default fallback for older cached backend responses that don't yet
+// include sectionMeta — real events will get their actual configured
+// sections (which may include Reception, Birthday, Corporate, etc, not
+// just these 3) from getGalleryImages()'s sectionMeta field instead.
+const DEFAULT_SECTION_META = [
+  { key:"engagement", label:"💍 Engagement" },
+  { key:"haldi",      label:"🌼 Haldi Ceremony" },
+  { key:"marriage",   label:"💒 Marriage" }
+];
+
 Promise.all([
-  fetch(APP_CONFIG.SCRIPT_URL+"?action=getSettings").then(r=>r.json()).catch(()=>({})),
+  getEventSettingsCached().catch(()=>({})),
   fetch(APP_CONFIG.SCRIPT_URL+"?action=getPublicVisibility").then(r=>r.json()).catch(()=>({showGallery:true}))
 ]).then(([settings, vis])=>{
   visibility = vis;
-  const name = settings.EventName||APP_CONFIG.EVENT_NAME||"EventPay";
+  const name = settings.EventName||"EventPay";
   document.getElementById("navEventName").textContent = name;
   document.title = "Gallery — "+name;
   document.getElementById("heroSub").textContent = name + " — Wedding Album";
@@ -275,8 +287,23 @@ function loadGallery() {
         return;
       }
       allSections = data.sections||{};
+
+      // Use the event's actual configured sections (from the backend)
+      // instead of the hardcoded engagement/haldi/marriage-only list, so
+      // Reception, Birthday, Corporate, etc. galleries also show up.
+      if (Array.isArray(data.sectionMeta) && data.sectionMeta.length) {
+        SECTION_CONFIG = data.sectionMeta.map(m => ({
+          key: m.key, label: m.label,
+          settingKey: "show" + m.key.charAt(0).toUpperCase() + m.key.slice(1) + "Gallery"
+        }));
+      }
+
       buildFlatImages();
-      if(!flatImages.length){ document.getElementById("emptyState").style.display="block"; return; }
+      // A configured-but-currently-empty folder should still show its
+      // section with an empty state, not vanish or be treated as a
+      // failure — only show the page-level empty state when there are
+      // no configured sections at all.
+      if(!Object.keys(allSections).length){ document.getElementById("emptyState").style.display="block"; return; }
       renderSections();
     })
     .catch(e=>{
@@ -286,11 +313,14 @@ function loadGallery() {
     });
 }
 
-const SECTION_CONFIG = [
-  { key:"engagement", label:"💍 Engagement",   settingKey:"showEngagementGallery" },
-  { key:"haldi",      label:"🌼 Haldi Ceremony", settingKey:"showHaldiGallery"    },
-  { key:"marriage",   label:"💒 Marriage",       settingKey:"showMarriageGallery"  }
-];
+// Populated once getGalleryImages() responds (see loadGallery below) using
+// its sectionMeta — i.e. only the sections this specific event actually
+// has folders configured for. Falls back to DEFAULT_SECTION_META if an
+// older cached response doesn't include sectionMeta yet.
+let SECTION_CONFIG = DEFAULT_SECTION_META.map(m => ({
+  key: m.key, label: m.label,
+  settingKey: "show" + m.key.charAt(0).toUpperCase() + m.key.slice(1) + "Gallery"
+}));
 
 function buildFlatImages(){
   flatImages = [];
@@ -312,12 +342,12 @@ function renderSections(){
 
   SECTION_CONFIG.forEach(sc=>{
     if(visibility[sc.settingKey]===false) return;
+    if(!(sc.key in allSections)) return; // event never configured this section at all
     const imgs = allSections[sc.key]||[];
-    if(!imgs.length) return;
     hasSections = true;
     totalPhotos += imgs.length;
 
-    // Section header
+    // Section header — shown even when the folder is currently empty
     const hdr = document.createElement("div");
     hdr.className = "section-header";
     hdr.innerHTML = `
@@ -325,9 +355,17 @@ function renderSections(){
         <div class="section-title">${sc.label}</div>
         <div class="section-count">${imgs.length} photo${imgs.length!==1?'s':''}</div>
       </div>
-      ${allowSectionDL ? `<button class="section-dl-btn" onclick="downloadSection('${sc.key}','${sc.label}')" id="dlSec_${sc.key}">⬇️ Download Entire Section</button>` : ""}
+      ${(allowSectionDL && imgs.length) ? `<button class="section-dl-btn" onclick="downloadSection('${sc.key}','${sc.label}')" id="dlSec_${sc.key}">⬇️ Download Entire Section</button>` : ""}
     `;
     container.appendChild(hdr);
+
+    if(!imgs.length){
+      const empty = document.createElement("div");
+      empty.style.cssText = "text-align:center;padding:24px 16px;color:var(--text-dim);font-size:13px;max-width:900px;margin:0 auto 20px";
+      empty.textContent = "No photos uploaded to "+sc.label+" yet.";
+      container.appendChild(empty);
+      return;
+    }
 
     // Grid
     const grid = document.createElement("div");
