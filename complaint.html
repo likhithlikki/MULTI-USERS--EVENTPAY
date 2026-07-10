@@ -85,7 +85,7 @@
 <nav class="navbar">
   <div class="nav-logo" id="navEventName">EventPay</div>
   <div class="nav-links">
-    <a href="index.html" class="nav-link">Home</a>
+    <a href="home.html" class="nav-link">Home</a>
     <a href="status.html" class="nav-link">Status</a>
     <a href="complaint.html" class="nav-link active">Complaint</a>
     <a href="admin-login.html" class="nav-link admin-link">Admin</a>
@@ -97,7 +97,7 @@
   </div>
 </nav>
 <div class="nav-mobile" id="navMobile">
-  <a href="index.html">🏠 Home</a>
+  <a href="home.html">🏠 Home</a>
   <a href="status.html">🔍 Check Status</a>
   <a href="complaint.html">📋 Complaint</a>
   <a href="admin-login.html">🔐 Admin</a>
@@ -191,7 +191,7 @@
     <div class="success-icon">✅</div>
     <div class="success-title">Complaint Submitted!</div>
     <div class="success-sub">Your complaint has been received. If you provided an email, the admin will reply there.</div>
-    <a href="index.html" class="btn-primary" style="display:inline-flex;text-decoration:none;margin:0 auto">🏠 Back to Home</a>
+    <a href="home.html" class="btn-primary" style="display:inline-flex;text-decoration:none;margin:0 auto">🏠 Back to Home</a>
     <div style="margin-top:12px;text-align:center">
       <a href="complaint.html" class="text-link" style="font-size:13px">Submit another complaint</a>
     </div>
@@ -203,6 +203,7 @@
 
 <script src="config.js"></script>
 <script>
+if (!requireEvent()) { /* redirected — no event selected */ }
 let villages=[], selectedFile=null, fileBase64=null;
 
 // Load settings + villages
