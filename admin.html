@@ -196,6 +196,7 @@ tbody td{padding:10px;vertical-align:middle;color:var(--text);}
 <div class="admin-bar">
   <div class="admin-left">
     <span class="admin-logo">⚡ Admin</span>
+    <span id="adminEventName" style="font-size:13px;font-weight:700;color:var(--text-muted);margin-left:4px"></span>
     <span class="role-badge" id="roleBadge">ADMIN</span>
     <span class="session-clock" id="sessionClock"></span>
   </div>
@@ -446,6 +447,7 @@ tbody td{padding:10px;vertical-align:middle;color:var(--text);}
 // ============================================================
 // AUTH
 // ============================================================
+if (!requireEvent()) { /* redirected — no event selected */ }
 const token     = sessionStorage.getItem("adminToken");
 const expiry    = sessionStorage.getItem("adminExpiry");
 const adminUser = sessionStorage.getItem("adminUser") || "Admin";
@@ -486,6 +488,15 @@ updateClock(); timerInt = setInterval(updateClock, 1000);
 
 function logout() { if (!confirm("Logout?")) return; sessionStorage.clear(); location.href = "admin-login.html"; }
 function hdrs() { return { adminToken: token, adminExpiry: expiry, adminUser }; }
+
+// Show which event this dashboard is currently open for.
+getEventSettingsCached().then(s => {
+  const name = s.EventName || getSelectedEventName() || "";
+  if (name) {
+    document.getElementById("adminEventName").textContent = "— " + name;
+    document.title = "Admin Dashboard — " + name;
+  }
+}).catch(() => {});
 
 // ============================================================
 // DATA
@@ -1010,7 +1021,7 @@ function renderSettingsPanel(s) {
     "SHOW_ENGAGEMENT_GALLERY","SHOW_HALDI_GALLERY","SHOW_MARRIAGE_GALLERY",
     "ALLOW_DOWNLOAD_ALL","ALLOW_SECTION_DOWNLOAD"
   ];
-  const event_keys = ["EventName","EventDate","EventTime","VenueAddress","VenueMapLink","UPI_ID","ORG_NAME","OrganizerEmail","SessionTimeoutMinutes","MIN_AMOUNT","MAX_AMOUNT"];
+  const event_keys = ["Event Name","EventDate","EventTime","VenueAddress","VenueMapLink","UPI_ID","ORG_NAME","OrganizerEmail","SessionTimeoutMinutes","MIN_AMOUNT","MAX_AMOUNT"];
   const media_keys = ["INVITATION_CARD_DRIVE_LINK","EVENT_GALLERY_FOLDER_ID","ENGAGEMENT_GALLERY_FOLDER_ID","HALDI_GALLERY_FOLDER_ID","MARRIAGE_GALLERY_FOLDER_ID","COMPLAINT_UPLOAD_FOLDER_ID"];
   const fraud_keys = ["FRAUD_THRESHOLD_HIGH","FRAUD_THRESHOLD_MEDIUM"];
   const textareaKeys = ["VenueAddress","VenueMapLink","INVITATION_CARD_DRIVE_LINK","EVENT_GALLERY_FOLDER_ID","ENGAGEMENT_GALLERY_FOLDER_ID","HALDI_GALLERY_FOLDER_ID","MARRIAGE_GALLERY_FOLDER_ID","COMPLAINT_UPLOAD_FOLDER_ID"];
