@@ -329,7 +329,13 @@
 
   
   
-if (!requireEvent()) return;
+if (!requireEvent()) {
+    window.location.href = "index.html";
+}
+console.log("EVENT SID =", getEventSID());
+console.log("EVENT API =", EVENT_API);
+console.log("CACHE =", getCachedEventData());
+console.log("SETTINGS =", getCachedEventSettings());
 
 const CURRENT_EVENT = {
     eid: sessionStorage.getItem(APP_CONFIG.LS.SELECTED_EID),
