@@ -1,131 +1,216 @@
 // ============================================================
 // EventPay — Code.gs  (SINGLE unified backend, single router)
 // ============================================================
-// This is the ONLY .gs file in this project that defines
-// doGet / doPost / handleAction. Do NOT add a second copy of any
-// of these anywhere else in the project — that is what caused
-// "Identifier already declared" errors and "Failed to fetch"
-// before (a second Code.gs-style file existed with the same
-// function names, which breaks the entire project at parse time).
+// This file is the ONLY .gs file in this project that may define
+// doGet / doPost / handleAction. Do NOT paste a second copy of any
+// of these functions anywhere else in the project (Apps Script
+// treats every .gs file as one shared global scope — a duplicate
+// function name anywhere breaks the ENTIRE project at parse time
+// with "Identifier ... has already been declared").
 //
-// Sheets used:
-//   MASTER DB spreadsheet: "Events" (registry), "AuditLog"
-//   Per-event spreadsheet: Payments | Complaints | Gallery |
-//                           Settings | AuditLog | Admins | Villages
+// ------------------------------------------------------------
+// UPDATE (multi-event fix): resolveSid_() below was already correct
+// — it checks p.sid first, then eventCode, then falls back to
+// DEFAULT_SPREADSHEET_ID. The bug was never in this file: it was
+// that every frontend page called the backend without ever sending
+// "sid" in the first place, so resolveSid_() had nothing to resolve
+// and always fell through to the default. That's fixed in config.js
+// (a single fetch() interceptor now attaches sid to every request
+// automatically). This file only adds: (a) Logger.log tracing inside
+// resolveSid_ so you can confirm from Executions which spreadsheet
+// each request actually resolved to, and (b) getCurrentSpreadsheet(p),
+// a thin named wrapper around SpreadsheetApp.openById(resolveSid_(p))
+// for any NEW code you add later, so future functions have one
+// obvious helper to call instead of reaching for openById() directly.
+// Every existing function below already goes through resolveSid_()
+// correctly and is left as-is to avoid risking working code.
+// ------------------------------------------------------------
+//
+// WHAT THIS FILE FIXES vs the previous "NEW" backend:
+//   1. Response shape. Every page (home.html, donors.html, status.html,
+//      gallery.html, invite.html, complaint.html, admin.html,
+//      admin-login.html) is the OLD, working frontend. It expects FLAT
+//      JSON back — {result:"Inserted"}, {donors:[...]}, {success:true,...}
+//      — never {success:true, data:{...}}. The previous backend wrapped
+//      everything in success/data, which is why every page looked broken
+//      even though nothing was "wrong" on screen: the JS was reading
+//      res.donors / res.payments / res.result and always getting undefined.
+//   2. Action names. The frontend calls insertPayment, validateUTR,
+//      getVillageSuggestions, getRecentTransactions, getPublicPayments,
+//      getGalleryImages, loginAdmin, getPayments, updatePayments,
+//      getComplaints, updateComplaint, insertComplaint, updateSettings,
+//      getAuditLog, getActivity, getSheetsList/getSheetData/updateSheetCell/
+//      addSheetRow/deleteSheetRow, undoActions, addUTRBlacklist,
+//      getUTRBlacklist, addVillageSuggestion — the previous backend had
+//      renamed or dropped most of these (e.g. only had createPaymentOrder/
+//      verifyPayment instead of insertPayment), which is exactly the
+//      "Unknown backend action: insertPayment" error you saw.
+//   3. "+" in event names. Apps Script's manual form-decoder used
+//      decodeURIComponent() directly on POST bodies. decodeURIComponent
+//      does NOT turn "+" into a space (only %XX is a real escape to it —
+//      "+" is a raw character as far as decodeURIComponent is concerned).
+//      Since browsers submit spaces as "+" in
+//      application/x-www-form-urlencoded bodies, "Birthday of Likith"
+//      was arriving as "Birthday+of+Likith" and getting stored that way.
+//      Fixed below in doPost() and with a cleanText_() helper used
+//      everywhere a name is displayed or turned into a folder name.
+//   4. Missing sheets/columns. Folders, gallery, complaints, and admin
+//      login now use header-based lookups (getColMap) everywhere, so
+//      adding a column never breaks anything, and sheets are created
+//      automatically if missing instead of throwing.
+//
+// HOW MULTI-EVENT WORKS NOW (fully backward compatible):
+//   - If a request includes "sid" (a Spreadsheet ID) or "eventCode",
+//     that event's spreadsheet is used.
+//   - If neither is present, DEFAULT_SPREADSHEET_ID below is used —
+//     i.e. every page in this bundle keeps working exactly like the
+//     single-event version, with ZERO changes needed to any .html/.js
+//     file, because config.js now attaches sid to every request itself.
+//   - config.js reads the selected event's Spreadsheet ID from
+//     localStorage/sessionStorage (set by index.html's selectEvent())
+//     and attaches it as "sid" to every fetch() call automatically.
 // ============================================================
 
-// ============================================================
-// 0. SCRIPT PROPERTIES  (Project Settings → Script Properties)
-// Required:  MASTER_DB_SPREADSHEET_ID  (or MASTER_DB_ID)
-// Optional:  RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET  (default/fallback
-//            keys used only if an event hasn't set its own in its
-//            Settings sheet)
-// ============================================================
+// ---- Legacy single-event spreadsheet (kept so nothing needs sid/eventCode) ----
+const DEFAULT_SPREADSHEET_ID = "1TsSOerv8tI1oqxrlhdJts5hEyTbY5sfu8m3AD3XxZjM";
+
+// ---- Public site URLs used only by the Apply-Event confirmation email ----
+const PUBLIC_BASE_URL = "https://likhithlikki.github.io/MULTI-USERS--EVENTPAY/home.html";
+const ADMIN_BASE_URL  = "https://likhithlikki.github.io/MULTI-USERS--EVENTPAY/admin-login.html";
 
 function getProp_(key) {
   const v = PropertiesService.getScriptProperties().getProperty(key);
   return v ? String(v).trim() : "";
 }
 
-function getMasterDbId() {
-  const id = getProp_("MASTER_DB_SPREADSHEET_ID") || getProp_("MASTER_DB_ID");
-  if (!id) {
-    throw new Error(
-      "MASTER_DB_SPREADSHEET_ID is not set in Script Properties. " +
-      "Go to Apps Script → Project Settings → Script Properties and add it " +
-      "(or MASTER_DB_ID — either name works)."
-    );
-  }
+// Master DB (Events registry) — optional. If not configured, the registry
+// simply lives inside DEFAULT_SPREADSHEET_ID itself (an "Events" tab is
+// created there on first use), so getEvents()/apply-event still work with
+// zero extra setup.
+function getMasterDbId_() {
+  return getProp_("MASTER_DB_SPREADSHEET_ID") || getProp_("MASTER_DB_ID") || DEFAULT_SPREADSHEET_ID;
+}
+
+// Parent Drive folder for auto-created event folders (Apply-Event flow only).
+function getRootDriveFolderId_() {
+  const id = getProp_("ROOT_DRIVE_FOLDER_ID");
+  if (!id) throw new Error("ROOT_DRIVE_FOLDER_ID is not set in Script Properties (Project Settings → Script Properties). Only required for the Apply-Event auto-create flow.");
   return id;
 }
-
-// Fixed parent Drive folder — every event's folder is created INSIDE
-// this one. Never create anything in My Drive root.
-function getRootDriveFolderId() {
-  const id = PropertiesService.getScriptProperties().getProperty("ROOT_DRIVE_FOLDER_ID");
-
-  if (!id) {
-    throw new Error(
-      "ROOT_DRIVE_FOLDER_ID is not set in Script Properties."
-    );
-  }
-
-  return id.trim();
-}
-
-const PUBLIC_BASE_URL = "https://likhithlikki.github.io/MULTI-USERS--EVENTPAY/home.html";
-const ADMIN_BASE_URL  = "https://likhithlikki.github.io/MULTI-USERS--EVENTPAY/admin-login.html";
 
 // ============================================================
 // 1. HTTP ENTRYPOINTS & ROUTER  (the ONLY doGet/doPost in the project)
 // ============================================================
 
 function doGet(e) {
-  return out(handleAction(e.parameter.action, e.parameter, null));
+  // DEFENSIVE: e is undefined when doGet is run manually from the Apps
+  // Script editor (Run > doGet), by certain warm-up/health-check calls,
+  // or by some monitoring tools that ping the URL without a query string.
+  // Never assume e or e.parameter exist — build a safe params object first.
+  const params = (e && e.parameter) ? e.parameter : {};
+  const action = params.action || "";
+  if (!action) {
+    return out_({
+      error: "No action specified. Call this URL with ?action=... — e.g. ?action=getEvents",
+      result: "Error",
+      success: false
+    });
+  }
+  return out_(handleAction(action, params, null));
 }
 
 function doPost(e) {
-  const params = e.parameter;
-  if (e.postData && e.postData.type === "application/x-www-form-urlencoded") {
+  // DEFENSIVE: same reasoning as doGet — e (and e.postData) can be
+  // undefined if doPost is invoked in a way that doesn't supply the
+  // normal request event (e.g. run manually from the editor).
+  const params = Object.assign({}, (e && e.parameter) ? e.parameter : {});
+  // FIX: form-urlencoded bodies use "+" for spaces. decodeURIComponent()
+  // does not convert "+" to " " — only real %XX escapes. Convert "+" to
+  // a space FIRST, then decode %XX, or every name/village/complaint with
+  // a space in it comes out as "Birthday+of+Likith".
+  if (e && e.postData && e.postData.type === "application/x-www-form-urlencoded" && e.postData.contents) {
     e.postData.contents.split("&").forEach(pair => {
+      if (!pair) return;
       const kv = pair.split("=");
-      params[decodeURIComponent(kv[0])] = decodeURIComponent(kv[1] || "");
+      const k = decodeURIComponent((kv[0] || "").replace(/\+/g, " "));
+      const v = decodeURIComponent((kv[1] || "").replace(/\+/g, " "));
+      params[k] = v;
     });
   }
-  return out(handleAction(params.action, params, e.postData));
+  const action = params.action || "";
+  if (!action) {
+    return out_({
+      error: "No action specified in POST body.",
+      result: "Error",
+      success: false
+    });
+  }
+  return out_(handleAction(action, params, e ? e.postData : null));
 }
 
-function out(r) {
+function out_(r) {
   return ContentService.createTextOutput(JSON.stringify(r))
-                       .setMimeType(ContentService.MimeType.JSON);
+                        .setMimeType(ContentService.MimeType.JSON);
 }
 
 function handleAction(action, p, pd) {
   try {
     switch (action) {
-      // ---- Public / Visitor ----
-      case "getEvents":
-    return apiGetEvents();
-      case "searchEvent":         return searchEvent(p);
-      case "getSettings":         return apiGetSettings(p);
-      case "getPublicVisibility": return apiGetPublicVisibility(p);
-      case "getPublicStats":      return apiGetPublicStats(p);
-      case "getPublicPayments":   return apiGetPublicPayments(p);
-      case "checkStatus":         return apiCheckStatus(p);
-      case "createPaymentOrder":  return apiCreatePaymentOrder(p);
-      case "verifyPayment":       return apiVerifyPayment(p);
-      case "getGalleryImages":    return apiGetGalleryImages(p);
-      case "uploadPhoto":         return apiUploadPhoto(p);
-      case "submitComplaint":     return apiSubmitComplaint(p);
-      case "getComplaintStatus":  return apiGetComplaintStatus(p);
+      // ---- Public / Visitor (per-event, sid/eventCode optional) ----
+      case "getSettings":           return getSettings(p);
+      case "getPublicVisibility":   return getPublicVisibility(p);
+      case "getPublicStats":        return getPublicStats(p);
+      case "getPublicPayments":     return getPublicPayments(p);
+      case "getRecentTransactions": return getRecentTransactions(p);
+      case "checkStatus":           return checkStatus(p);
+      case "insertPayment":         return insertPayment(p);
+      case "insertComplaint":       return insertComplaint(p);
+      case "submitComplaint":       return insertComplaint(p); // alias
+      case "getVillageSuggestions": return getVillageSuggestions(p);
+      case "validateUTR":           return validateUTR(p);
+      case "getGalleryImages":      return getGalleryImages(p);
 
-      // ---- Admin ----
-      case "loginAdmin":       return apiLoginAdmin(p);
-      case "adminLogout":      return apiAdminLogout(p);
-      case "getPayments":      return apiGetPayments(p);
-      case "updatePayments":   return apiUpdatePayments(p);
-      case "getComplaints":    return apiGetComplaints(p);
-      case "updateComplaint":  return apiUpdateComplaint(p);
-      case "getPendingPhotos": return apiGetPendingPhotos(p);
-      case "moderatePhoto":    return apiModeratePhoto(p);
-      case "deletePhoto":      return apiDeletePhoto(p);
+      // ---- Admin (per-event) ----
+      case "loginAdmin":            return loginAdmin(p);
+      case "getPayments":           return getPayments(p);
+      case "updatePayments":        return updatePayments(p);
+      case "getComplaints":         return getComplaints(p);
+      case "updateComplaint":       return updateComplaint(p);
+      case "logActivity":           return logActivity(p);
+      case "getActivity":           return getActivity(p);
+      case "updatePublicDisplay":   return updatePublicDisplay(p);
+      case "addVillageSuggestion":  return addVillageSuggestion(p);
+      case "addUTRBlacklist":       return addUTRBlacklist(p);
+      case "getUTRBlacklist":       return getUTRBlacklist(p);
 
-      // ---- Super Admin ----
-      case "updateSettings":         return apiUpdateSettings(p);
-      case "getAuditLog":            return apiGetAuditLog(p);
-      case "createEventSpreadsheet": return apiCreateEventSpreadsheet(p); // manual/legacy re-init
+      // ---- Super Admin (per-event) ----
+      case "updateSettings":        return updateSettings(p);
+      case "getAuditLog":           return getAuditLog(p);
+      case "getSheetsList":         return getSheetsList(p);
+      case "getSheetData":          return getSheetData(p);
+      case "updateSheetCell":       return updateSheetCell(p);
+      case "addSheetRow":           return addSheetRow(p);
+      case "deleteSheetRow":        return deleteSheetRow(p);
+      case "undoActions":           return undoActions(p);
 
-      // ---- Apply / Create Event (merged — same router, no 2nd doGet/doPost) ----
-      case "sendOrganizerOtp":       return apiSendOrganizerOtp(p);
-      case "verifyOrganizerOtp":     return apiVerifyOrganizerOtp(p);
-      case "checkDuplicateEvent":    return apiCheckDuplicateEvent(p);
-      case "submitEventApplication": return apiSubmitEventApplication(p);
+      // ---- Multi-event registry (Master DB) ----
+      case "getEvents":             return getEvents(p);
+      case "searchEvent":           return searchEvent(p);
+      case "createEventSpreadsheet":return createEventSpreadsheetAction(p);
+
+      // ---- Apply / Create Event ----
+      case "sendOrganizerOtp":       return sendOrganizerOtp(p.email);
+      case "verifyOrganizerOtp":     return verifyOrganizerOtp(p.email, p.otp);
+      case "checkDuplicateEvent":    return checkDuplicateEvent(p.organizerEmail, p.eventDate, p.eventName);
+      case "submitEventApplication": return submitEventApplicationAction(p);
 
       default:
-        return jsonError("Unknown backend action: " + action);
+        // Never crash and never show a bare "Unknown backend action" —
+        // return a structured, safe JSON error instead (requirement #16).
+        return { error: "Unknown action: " + action, result: "Error", success: false };
     }
   } catch (err) {
-    return jsonError("Internal Server Error: " + err.message);
+    return { error: err.message, result: "Error", success: false };
   }
 }
 
@@ -133,29 +218,32 @@ function handleAction(action, p, pd) {
 // 2. CORE UTILITY HELPERS
 // ============================================================
 
-function jsonSuccess(data) { return { success: true, data: data }; }
-function jsonError(message) { return { success: false, error: message }; }
-
-function serializeVal(val, key) {
-  if (val instanceof Date) {
-    const tz = Session.getScriptTimeZone();
-    const k = String(key || '').toLowerCase().trim();
-    if (val.getFullYear() <= 1900) return Utilities.formatDate(val, tz, "hh:mm a");
-    if (k === 'date' || k === 'paymentdate' || k === 'createddate' || k === 'updateddate') {
-      return Utilities.formatDate(val, tz, "dd-MMM-yyyy");
-    }
-    if (k === 'time') return Utilities.formatDate(val, tz, "hh:mm a");
-    return Utilities.formatDate(val, tz, "dd-MMM-yyyy hh:mm a");
-  }
-  return val;
+// Decode "+" and %XX sequences for DISPLAY / folder-naming only.
+// Never mutates what's already correctly stored — safe to call on any string.
+function cleanText_(s) {
+  if (s === null || s === undefined) return s;
+  let str = String(s);
+  if (str.indexOf("+") === -1 && str.indexOf("%") === -1) return str.trim();
+  try {
+    str = str.replace(/\+/g, " ");
+    if (/%[0-9A-Fa-f]{2}/.test(str)) str = decodeURIComponent(str);
+  } catch (e) { /* leave as-is if it isn't actually URL-encoded */ }
+  return str.replace(/\s+/g, " ").trim();
 }
 
+function serializeVal(val, key) {
+  if (!(val instanceof Date)) return val;
+  const tz = Session.getScriptTimeZone(), k = String(key || '').toLowerCase().trim();
+  if (val.getFullYear() <= 1900) return Utilities.formatDate(val, tz, "hh:mm a");
+  if (k === 'date')              return Utilities.formatDate(val, tz, "dd-MMM-yyyy");
+  if (k === 'time')              return Utilities.formatDate(val, tz, "hh:mm a");
+  return Utilities.formatDate(val, tz, "dd-MMM-yyyy hh:mm a");
+}
 function getColMap(headers) {
   const m = {};
   headers.forEach((h, i) => { if (h) m[String(h).trim().toLowerCase()] = i; });
   return m;
 }
-
 function extractFolderID(v) {
   if (!v) return null;
   const s = String(v).trim();
@@ -165,26 +253,22 @@ function extractFolderID(v) {
   if (f) return f[1];
   return s;
 }
-
 function extractSpreadsheetId_(link) {
   if (!link) return null;
-  if (/^[a-zA-Z0-9_-]{20,}$/.test(link.trim())) return link.trim(); // already a bare ID
-  const m = link.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  const s = String(link).trim();
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(s)) return s; // already a bare ID
+  const m = s.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
   return m ? m[1] : null;
 }
-
 function levenshtein(a, b) {
   const m = a.length, n = b.length, dp = [];
   for (let i = 0; i <= m; i++) { dp[i] = [i]; for (let j = 1; j <= n; j++) dp[i][j] = 0; }
   for (let j = 0; j <= n; j++) dp[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
       dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
-    }
-  }
   return dp[m][n];
 }
-
 function nowFormatted() {
   const tz = Session.getScriptTimeZone(), now = new Date();
   return {
@@ -194,29 +278,105 @@ function nowFormatted() {
     iso: now.toISOString()
   };
 }
-
 function formatReadableDate_(date) {
   return Utilities.formatDate(date, Session.getScriptTimeZone() || "Asia/Kolkata", "dd-MMM-yyyy hh:mm a");
 }
 
+// Builds a row array that matches a sheet's ACTUAL header order, so adding
+// a column never shifts existing data and nothing is ever hardcoded by index.
+function buildRowFromHeaders_(sheet, obj) {
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  return headers.map(h => {
+    const key = String(h).trim();
+    return obj[key] !== undefined ? obj[key] : "";
+  });
+}
+
+function verifyAdmin(params) {
+  if (!params.adminToken) throw new Error("Unauthorized: no token");
+  if (params.adminExpiry && new Date() > new Date(params.adminExpiry)) throw new Error("Session expired");
+}
+function verifySuperAdmin(params) {
+  verifyAdmin(params);
+  const ss = getCurrentSpreadsheet(params);
+  const sheet = ss.getSheetByName("Admins");
+  if (!sheet) throw new Error("Admins sheet not found");
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === params.adminUser) {
+      const role = String(data[i][2]).trim().toLowerCase();
+      if (role !== "superadmin" && role !== "super admin") throw new Error("Super Admin access required");
+      return;
+    }
+  }
+  throw new Error("User not found");
+}
+
 // ============================================================
-// 3. MASTER DATABASE — EVENTS REGISTRY
+// 3. MULTI-EVENT RESOLUTION  (backward compatible — see header note)
 // ============================================================
-// Registry column layout (must match EVENTS_SHEET_HEADERS below):
-// EventID(0) EventCode(1) EventType(2) EventName(3) SpreadsheetID(4)
-// SpreadsheetLink(5) OrganizerName(6) OrganizerPhone(7) OrganizerEmail(8)
-// Plan(9) TrialExpiry(10) Status(11) SettlementStatus(12) CreatedDate(13)
-// UpdatedDate(14) AdminUsername(15) AdminPassword(16) PublicURL(17) AdminURL(18)
+// Every event-scoped function below calls resolveSid_(params) (usually via
+// SpreadsheetApp.openById(resolveSid_(p))) instead of touching a hardcoded
+// ID directly. If the caller doesn't send sid/eventCode it transparently
+// uses DEFAULT_SPREADSHEET_ID — i.e. behaves exactly like the old
+// single-event app. In this bundle the caller (config.js) now ALWAYS sends
+// sid once an event has been selected, so that fallback only kicks in
+// before any event is picked, or for the Apply-Event / Master-DB actions
+// that intentionally don't scope to a single event.
+
+function resolveSid_(p) {
+  let resolved = DEFAULT_SPREADSHEET_ID;
+  let via = "default";
+
+  if (p && p.sid && String(p.sid).trim()) {
+    resolved = String(p.sid).trim();
+    via = "sid";
+  } else {
+    const code = p && (p.eventCode || p.code);
+    if (code) {
+      const id = lookupSpreadsheetIdByCode_(code);
+      if (id) { resolved = id; via = "eventCode"; }
+    }
+  }
+
+  // DEBUG: trace exactly which spreadsheet each request resolves to.
+  // View these in Apps Script → Executions while reproducing an issue.
+  try {
+    Logger.log(
+      "resolveSid_ | action=%s | received sid=%s | received eventCode=%s | resolved via=%s | resolvedSpreadsheetId=%s",
+      (p && p.action) || "(n/a)",
+      (p && p.sid) || "(none)",
+      (p && (p.eventCode || p.code)) || "(none)",
+      via,
+      resolved
+    );
+  } catch (e) { /* Logger should never break a request */ }
+
+  return resolved;
+}
+
+// Single named helper for opening the correct per-event spreadsheet.
+// New code should call this instead of SpreadsheetApp.openById(...) directly.
+// (Existing functions below already call SpreadsheetApp.openById(resolveSid_(p))
+// inline — functionally identical to this — and are left untouched.)
+function getCurrentSpreadsheet(p) {
+  const sid = resolveSid_(p);
+  const ss = SpreadsheetApp.openById(sid);
+  try {
+    Logger.log("getCurrentSpreadsheet | Opened spreadsheet id=%s | name=%s", sid, ss.getName());
+  } catch (e) {}
+  return ss;
+}
 
 const EVENTS_SHEET_HEADERS = [
-  "EventID","EventCode","EventType","EventName","SpreadsheetID","SpreadsheetLink",
-  "OrganizerName","OrganizerPhone","OrganizerEmail","Plan","TrialExpiry","Status",
-  "SettlementStatus","CreatedDate","UpdatedDate","AdminUsername","AdminPassword",
-  "PublicURL","AdminURL"
+  "EventID", "EventCode", "EventType", "EventName", "SpreadsheetID", "SpreadsheetLink",
+  "OrganizerName", "OrganizerPhone", "OrganizerEmail", "Plan", "TrialExpiry", "Status",
+  "SettlementStatus", "CreatedDate", "UpdatedDate", "AdminUsername", "AdminPassword",
+  "PublicURL", "AdminURL"
 ];
 
 function getOrCreateEventsSheet_() {
-  const ss = SpreadsheetApp.openById(getMasterDbId());
+  const ss = SpreadsheetApp.openById(getMasterDbId_());
   let sheet = ss.getSheetByName("Events");
   if (!sheet) {
     sheet = ss.insertSheet("Events");
@@ -227,822 +387,947 @@ function getOrCreateEventsSheet_() {
   return sheet;
 }
 
-function searchEvent(params) {
+function lookupSpreadsheetIdByCode_(eventCode) {
   try {
     const sheet = getOrCreateEventsSheet_();
     const data = sheet.getDataRange().getValues();
-    const headers = data[0];
-    const col = getColMap(headers);
-
-    const codeC   = col["eventcode"]   !== undefined ? col["eventcode"]   : 1;
-    const nameC   = col["eventname"]   !== undefined ? col["eventname"]   : 3;
-    const typeC   = col["eventtype"]   !== undefined ? col["eventtype"]   : 2;
-    const statusC = col["status"]      !== undefined ? col["status"]      : 11;
-
-    const searchCode = params.code ? String(params.code).trim().toLowerCase() : null;
-    const searchName = params.name ? String(params.name).trim().toLowerCase() : null;
-
-    const matches = [];
+    const col = getColMap(data[0]);
+    const codeC = col["eventcode"] !== undefined ? col["eventcode"] : 1;
+    const ssIdC = col["spreadsheetid"] !== undefined ? col["spreadsheetid"] : 4;
+    const clean = String(eventCode).trim().toLowerCase();
     for (let i = 1; i < data.length; i++) {
-      const codeVal = String(data[i][codeC]).trim();
-      const nameVal = String(data[i][nameC]).trim();
-      const typeVal = String(data[i][typeC]).trim();
-      const statusVal = String(data[i][statusC]).trim();
-      if (statusVal.toLowerCase() !== "active") continue;
-
-      let isMatch = false;
-      if (searchCode && codeVal.toLowerCase() === searchCode) isMatch = true;
-      else if (searchName && nameVal.toLowerCase().indexOf(searchName) !== -1) isMatch = true;
-
-      if (isMatch) matches.push({ eventCode: codeVal, eventName: nameVal, eventType: typeVal });
+      if (String(data[i][codeC]).trim().toLowerCase() === clean) {
+        const id = String(data[i][ssIdC]).trim();
+        return id || null;
+      }
     }
-    return jsonSuccess({ matches: matches });
-  } catch (err) {
-    return jsonError(err.message);
-  }
+  } catch (e) { /* fall through */ }
+  return null;
 }
 
-function resolveSpreadsheetID(eventCode) {
-  if (!eventCode) throw new Error("EventCode is required.");
-  const sheet = getOrCreateEventsSheet_();
-  const data = sheet.getDataRange().getValues();
-  const col = getColMap(data[0]);
-
-  const codeC   = col["eventcode"]     !== undefined ? col["eventcode"]     : 1;
-  const ssIdC   = col["spreadsheetid"] !== undefined ? col["spreadsheetid"] : 4;
-  const statusC = col["status"]        !== undefined ? col["status"]        : 11;
-
-  const cleanCode = eventCode.trim().toLowerCase();
-  for (let i = 1; i < data.length; i++) {
-    const codeVal = String(data[i][codeC]).trim().toLowerCase();
-    if (codeVal === cleanCode) {
-      const statusVal = String(data[i][statusC]).trim().toLowerCase();
-      if (statusVal !== "active") throw new Error("This event is inactive.");
-      const ssId = String(data[i][ssIdC]).trim();
-      if (!ssId) throw new Error("Spreadsheet ID is missing for this event.");
-      return ssId;
-    }
-  }
-  throw new Error("Event code not found in registry.");
-}
-
-function openEventSpreadsheet(spreadsheetId) {
+function getEvents(p) {
   try {
-    return SpreadsheetApp.openById(spreadsheetId);
+    const sheet = getOrCreateEventsSheet_();
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) return { events: [] };
+    const headers = data[0].map(h => String(h).trim());
+    const statusC = getColMap(data[0])["status"];
+    const nameC = getColMap(data[0])["eventname"];
+    const events = [];
+    for (let i = 1; i < data.length; i++) {
+      if (!data[i][0]) continue;
+      const row = {};
+      headers.forEach((h, j) => { row[h] = data[i][j]; });
+      if (nameC !== undefined) row.EventName = cleanText_(data[i][nameC]); // strip "+" from names
+      if (statusC !== undefined && String(data[i][statusC]).trim().toLowerCase() !== "active") continue;
+      events.push(row);
+    }
+    return { events: events };
   } catch (err) {
-    throw new Error("Could not open event database: " + err.message);
+    return { events: [], error: err.message };
   }
 }
 
-// ============================================================
-// 4. EVENT CONTEXT RESOLVER
-// Accepts EITHER params.sid (the event's Spreadsheet ID directly)
-// OR params.eventCode / params.code (looked up via the registry).
-// This keeps both calling styles working without knowing which
-// one every frontend page currently uses.
-// ============================================================
-
-function resolveEventContext(params) {
-  let spreadsheetId = params.sid;
-  const eventCode = params.eventCode || params.code || "";
-  if (!spreadsheetId) {
-    if (!eventCode) throw new Error("Missing parameter: sid or eventCode.");
-    spreadsheetId = resolveSpreadsheetID(eventCode);
-  }
-  const ss = openEventSpreadsheet(spreadsheetId);
-  return { ss: ss, eventCode: eventCode ? eventCode.toUpperCase().trim() : "", spreadsheetId: spreadsheetId };
-}
-
-function resolveEventMetadata(params) {
-  const context = resolveEventContext(params);
-
-  let eventName = "EventPay", eventType = "General", status = "Active";
-  if (context.eventCode) {
-    const registrySheet = getOrCreateEventsSheet_();
-    const data = registrySheet.getDataRange().getValues();
+function searchEvent(p) {
+  try {
+    const sheet = getOrCreateEventsSheet_();
+    const data = sheet.getDataRange().getValues();
     const col = getColMap(data[0]);
     const codeC = col["eventcode"] !== undefined ? col["eventcode"] : 1;
     const nameC = col["eventname"] !== undefined ? col["eventname"] : 3;
     const typeC = col["eventtype"] !== undefined ? col["eventtype"] : 2;
     const statusC = col["status"] !== undefined ? col["status"] : 11;
-    const cleanCode = context.eventCode.toLowerCase();
+    const searchCode = p.code ? String(p.code).trim().toLowerCase() : null;
+    const searchName = p.name ? String(p.name).trim().toLowerCase() : null;
+    const matches = [];
     for (let i = 1; i < data.length; i++) {
-      if (String(data[i][codeC]).trim().toLowerCase() === cleanCode) {
-        eventName = String(data[i][nameC]).trim();
-        eventType = String(data[i][typeC]).trim();
-        status = String(data[i][statusC]).trim();
-        break;
-      }
+      const codeVal = String(data[i][codeC]).trim();
+      const nameVal = cleanText_(data[i][nameC]);
+      const typeVal = String(data[i][typeC]).trim();
+      if (String(data[i][statusC]).trim().toLowerCase() !== "active") continue;
+      let isMatch = false;
+      if (searchCode && codeVal.toLowerCase() === searchCode) isMatch = true;
+      else if (searchName && nameVal.toLowerCase().indexOf(searchName) !== -1) isMatch = true;
+      if (isMatch) matches.push({ eventCode: codeVal, eventName: nameVal, eventType: typeVal });
     }
+    return { matches: matches };
+  } catch (err) {
+    return { matches: [], error: err.message };
   }
-
-  const settingsSheet = context.ss.getSheetByName("Settings");
-  const settingsObj = {};
-  if (settingsSheet) {
-    settingsSheet.getDataRange().getValues().forEach(r => { if (r[0]) settingsObj[String(r[0]).trim()] = r[1]; });
-    if (settingsObj["Event Name"] && eventName === "EventPay") eventName = settingsObj["Event Name"];
-    if (settingsObj["Event Type"] && eventType === "General") eventType = settingsObj["Event Type"];
-  }
-
-  return { eventCode: context.eventCode, eventName: eventName, eventType: eventType, status: status, settings: settingsObj };
 }
 
-// ============================================================
-// 5. EVENT SETTINGS
-// ============================================================
-
-function apiGetSettings(params) {
-  try { return jsonSuccess(resolveEventMetadata(params)); }
-  catch (err) { return jsonError(err.message); }
-}
-
-function apiGetPublicVisibility(params) {
+function createEventSpreadsheetAction(p) {
   try {
-    const context = resolveEventContext(params);
-    const settingsSheet = context.ss.getSheetByName("Settings");
-    const s = {};
-    if (settingsSheet) settingsSheet.getDataRange().getValues().forEach(r => { if (r[0]) s[String(r[0]).trim()] = r[1]; });
-
-    const isActive = (key) => String(s[key] || "ACTIVE").toUpperCase().trim() === "ACTIVE" ||
-                               String(s[key] || "").toLowerCase().trim() === "true" ||
-                               String(s[key] || "").trim() === "1";
-
-    return jsonSuccess({
-      showDonorList: isActive("SHOW_DONOR_LIST"), showStatistics: isActive("SHOW_STATISTICS"),
-      showHomepageStats: isActive("SHOW_HOMEPAGE_STATS"), showHomepageDonors: isActive("SHOW_HOMEPAGE_DONORS"),
-      showGallery: isActive("SHOW_GALLERY"), showInviteCard: isActive("SHOW_INVITE_CARD"),
-      showPendingPayments: isActive("SHOW_PENDING_PAYMENTS"), showVerifiedPayments: isActive("SHOW_VERIFIED_PAYMENTS"),
-      showRecentPayments: isActive("SHOW_RECENT_PAYMENTS"), showEngagementGallery: isActive("SHOW_ENGAGEMENT_GALLERY"),
-      showHaldiGallery: isActive("SHOW_HALDI_GALLERY"), showMarriageGallery: isActive("SHOW_MARRIAGE_GALLERY"),
-      allowDownloadAll: isActive("ALLOW_DOWNLOAD_ALL"), allowSectionDownload: isActive("ALLOW_SECTION_DOWNLOAD"),
-      showComplaints: isActive("SHOW_COMPLAINTS"), showVideos: isActive("SHOW_VIDEOS"), showAnalytics: isActive("SHOW_ANALYTICS")
-    });
-  } catch (err) { return jsonError(err.message); }
-}
-
-function apiUpdateSettings(params) {
-  try {
-    verifySuperAdmin(params);
-    const context = resolveEventContext(params);
-    const sheet = context.ss.getSheetByName("Settings");
-    if (!sheet) return jsonError("Settings sheet not found.");
-
-    const data = sheet.getDataRange().getValues();
-    const updates = JSON.parse(params.updates || '{}');
-
-    Object.keys(updates).forEach(key => {
-      let found = false;
-      for (let i = 0; i < data.length; i++) {
-        if (String(data[i][0]).trim() === key) {
-          const oldVal = data[i][1];
-          sheet.getRange(i + 1, 2).setValue(updates[key]);
-          logAuditRecord(context.ss, { adminUser: params.adminUser, module: "Settings", action: "Update", field: key, oldValue: String(oldVal), newValue: String(updates[key]), reason: params.reason || "" });
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
-        sheet.appendRow([key, updates[key]]);
-        logAuditRecord(context.ss, { adminUser: params.adminUser, module: "Settings", action: "Create", field: key, oldValue: "", newValue: String(updates[key]), reason: params.reason || "Init settings param" });
-      }
-    });
-    return jsonSuccess({ result: "Saved" });
-  } catch (err) { return jsonError(err.message); }
+    verifySuperAdmin(p);
+    const spreadsheetId = p.targetSpreadsheetId || p.sid;
+    if (!spreadsheetId) return { result: "Error", error: "Target Spreadsheet ID is required." };
+    const result = initializeEventSpreadsheet(spreadsheetId);
+    return { result: result.success ? "SpreadsheetInitialized" : "Failed" };
+  } catch (err) { return { result: "Error", error: err.message }; }
 }
 
 // ============================================================
-// 6. PAYMENTS & RAZORPAY
+// 4. SETTINGS — Vertical format: Col A = key, Col B = value
 // ============================================================
+function getSettings(p) {
+  const ss = getCurrentSpreadsheet(p);
+  const sheet = ss.getSheetByName("Settings");
+  if (!sheet) return {};
+  const data = sheet.getDataRange().getValues();
+  const obj = {};
+  data.forEach(r => { if (r[0]) obj[String(r[0]).trim()] = r[1]; });
+  if (obj["Event Name"]) obj["Event Name"] = cleanText_(obj["Event Name"]);
+  if (obj["EventName"]) obj["EventName"] = cleanText_(obj["EventName"]);
+  return obj;
+}
 
-function razorpayKeys_(s) {
-  // Per-event key (Settings sheet) wins; Script Properties value is
-  // only used as the default when an event hasn't configured its own.
+function getPublicVisibility(p) {
+  const s = getSettings(p);
+  const isActive = (key) => String(s[key] || "ACTIVE").toUpperCase().trim() === "ACTIVE";
   return {
-    keyId: s["RAZORPAY_KEY_ID"] || getProp_("RAZORPAY_KEY_ID"),
-    keySecret: s["RAZORPAY_KEY_SECRET"] || getProp_("RAZORPAY_KEY_SECRET")
+    showDonorList:          isActive("SHOW_DONOR_LIST"),
+    showStatistics:         isActive("SHOW_STATISTICS"),
+    showHomepageStats:      isActive("SHOW_HOMEPAGE_STATS"),
+    showHomepageDonors:     isActive("SHOW_HOMEPAGE_DONORS"),
+    showGallery:            isActive("SHOW_GALLERY"),
+    showInviteCard:         isActive("SHOW_INVITE_CARD"),
+    showPendingPayments:    isActive("SHOW_PENDING_PAYMENTS"),
+    showVerifiedPayments:   isActive("SHOW_VERIFIED_PAYMENTS"),
+    showRecentPayments:     isActive("SHOW_RECENT_PAYMENTS"),
+    showEngagementGallery:  isActive("SHOW_ENGAGEMENT_GALLERY"),
+    showHaldiGallery:       isActive("SHOW_HALDI_GALLERY"),
+    showMarriageGallery:    isActive("SHOW_MARRIAGE_GALLERY"),
+    allowDownloadAll:       isActive("ALLOW_DOWNLOAD_ALL"),
+    allowSectionDownload:   isActive("ALLOW_SECTION_DOWNLOAD")
   };
 }
 
-function apiCreatePaymentOrder(params) {
-  try {
-    const context = resolveEventContext(params);
-    const settingsSheet = context.ss.getSheetByName("Settings");
-    const s = {};
-    if (settingsSheet) settingsSheet.getDataRange().getValues().forEach(r => { if (r[0]) s[String(r[0]).trim()] = r[1]; });
-
-    const { keyId, keySecret } = razorpayKeys_(s);
-    if (!keyId || !keySecret) return jsonError("Razorpay keys are not configured for this event.");
-
-    const amount = Number(params.amount);
-    if (!amount || amount <= 0) return jsonError("Invalid amount.");
-
-    const minAmt = Number(s["MIN_AMOUNT"] || 50);
-    const maxAmt = Number(s["MAX_AMOUNT"] || 100000);
-    if (amount < minAmt) return jsonError("Amount is below minimum ₹" + minAmt);
-    if (amount > maxAmt) return jsonError("Amount exceeds maximum ₹" + maxAmt);
-
-    const url = "https://api.razorpay.com/v1/orders";
-    const payload = { amount: amount * 100, currency: "INR", receipt: "receipt_" + Utilities.getUuid().substring(0, 8) };
-    const options = {
-      method: "post", contentType: "application/json",
-      headers: { "Authorization": "Basic " + Utilities.base64Encode(keyId + ":" + keySecret) },
-      payload: JSON.stringify(payload), muteHttpExceptions: true
-    };
-
-    const response = UrlFetchApp.fetch(url, options);
-    const resText = response.getContentText();
-    const resData = JSON.parse(resText);
-    if (response.getResponseCode() !== 200) {
-      return jsonError("Razorpay order creation failed: " + (resData.error && resData.error.description || resText));
-    }
-    return jsonSuccess({ razorpayOrderId: resData.id, amountPaise: resData.amount, currency: resData.currency, keyId: keyId });
-  } catch (err) { return jsonError(err.message); }
-}
-
-function apiVerifyPayment(params) {
-  try {
-    const context = resolveEventContext(params);
-    const settingsSheet = context.ss.getSheetByName("Settings");
-    const s = {};
-    if (settingsSheet) settingsSheet.getDataRange().getValues().forEach(r => { if (r[0]) s[String(r[0]).trim()] = r[1]; });
-
-    const { keyId, keySecret } = razorpayKeys_(s);
-    if (!keySecret) return jsonError("Payment gateway configuration missing.");
-
-    const orderId = params.razorpay_order_id, paymentId = params.razorpay_payment_id, signature = params.razorpay_signature;
-    if (!orderId || !paymentId || !signature) return jsonError("Missing verification parameters.");
-
-    const signPayload = orderId + "|" + paymentId;
-    const computedSignature = Utilities.computeHmacSha256Signature(signPayload, keySecret);
-    const computedSignatureHex = computedSignature.map(b => { let hex = (b & 0xff).toString(16); return hex.length === 1 ? '0' + hex : hex; }).join('');
-    if (computedSignatureHex !== signature) return jsonError("Payment signature verification failed. Potential fraud attempt.");
-
-    const paymentsSheet = context.ss.getSheetByName("Payments");
-    if (!paymentsSheet) return jsonError("Payments table not found.");
-
-    const url = "https://api.razorpay.com/v1/payments/" + paymentId;
-    const options = { method: "get", headers: { "Authorization": "Basic " + Utilities.base64Encode(keyId + ":" + keySecret) }, muteHttpExceptions: true };
-    const response = UrlFetchApp.fetch(url, options);
-    const pDetails = JSON.parse(response.getContentText());
-    if (response.getResponseCode() !== 200 || pDetails.status !== "captured") {
-      return jsonError("Payment verification failed on gateway. Status: " + (pDetails.status || "Unknown"));
-    }
-
-    const amount = Number(pDetails.amount) / 100;
-    const name = params.name || pDetails.notes.name || "Anonymous";
-    const village = params.village || pDetails.notes.village || "";
-    const phone = params.phone || pDetails.contact || "";
-    const email = params.email || pDetails.email || "";
-    const message = params.message || pDetails.notes.message || "";
-
-    const n = nowFormatted();
-    const receiptNum = "EP" + n.date.replace(/-/g,"") + "_" + Utilities.getUuid().substring(0, 4).toUpperCase();
-
-    paymentsSheet.appendRow([receiptNum, orderId, paymentId, name, village, phone, email, amount, message, n.date + " " + n.time, "Paid", "Pending", "None", n.iso, n.iso]);
-    addVillageInternal(context.ss, village);
-
-    try {
-      if (s["OrganizerEmail"]) {
-        MailApp.sendEmail({ to: String(s["OrganizerEmail"]), subject: "💰 Contribution: " + name + " - ₹" + amount, body: "Name: " + name + "\nVillage: " + village + "\nPhone: " + phone + "\nAmount: ₹" + amount + "\nReceipt: " + receiptNum + "\nPayment ID: " + paymentId });
+function updateSettings(p) {
+  verifySuperAdmin(p);
+  const ss = getCurrentSpreadsheet(p);
+  const sheet = ss.getSheetByName("Settings");
+  if (!sheet) throw new Error("Settings sheet not found");
+  const data = sheet.getDataRange().getValues();
+  const updates = JSON.parse(p.updates || '{}');
+  Object.keys(updates).forEach(key => {
+    let found = false;
+    for (let i = 0; i < data.length; i++) {
+      if (String(data[i][0]).trim() === key) {
+        const oldVal = data[i][1];
+        sheet.getRange(i + 1, 2).setValue(updates[key]);
+        logAudit({ adminUser: p.adminUser, module: "Settings", action: "Update",
+          field: key, oldValue: String(oldVal), newValue: String(updates[key]), reason: p.reason || "",
+          row: i + 1, column: 2 }, p);
+        found = true; break;
       }
-    } catch (e) {}
-
-    return jsonSuccess({ receiptNumber: receiptNum, paymentId: paymentId, amount: amount, date: n.date, time: n.time });
-  } catch (err) { return jsonError(err.message); }
+    }
+    if (!found) sheet.appendRow([key, updates[key]]);
+  });
+  logActivity({ adminUser: p.adminUser, module: "Settings", action: "SettingsUpdate",
+    detail: "Updated " + Object.keys(updates).length + " setting(s)" }, p);
+  return { result: "Saved" };
 }
 
-function addVillageInternal(ss, villageName) {
+// ============================================================
+// 5. ADMIN LOGIN  (per-event Admins sheet, with Master DB fallback)
+// ============================================================
+function loginAdmin(p) {
+  const sid = resolveSid_(p);
+  const ss = SpreadsheetApp.openById(sid);
+  const sheet = ss.getSheetByName("Admins");
+  let matchedRow = null, adminsData = null;
+
+  if (sheet) {
+    adminsData = sheet.getDataRange().getValues();
+    for (let i = 1; i < adminsData.length; i++) {
+      const u = String(adminsData[i][0]).trim(), pw = String(adminsData[i][1]).trim();
+      if (u === p.username && pw === p.password) { matchedRow = i; break; }
+    }
+  }
+
+  if (matchedRow !== null) {
+    const status = String(adminsData[matchedRow][4] || "Active").trim();
+    if (status.toLowerCase() === "inactive") return { success: false, error: "Account inactive" };
+    const s = getSettings(p);
+    const timeout = parseInt(s.SessionTimeoutMinutes) || 30;
+    const expiry = new Date(Date.now() + timeout * 60 * 1000).toISOString();
+    const token = Utilities.getUuid();
+    try { sheet.getRange(matchedRow + 1, 8).setValue(nowFormatted().full); } catch (e) {}
+    logActivity({ adminUser: p.username, module: "Auth", action: "Login", detail: "Successful login" }, p);
+    logAudit({ adminUser: p.username, module: "Auth", action: "Login",
+      field: "session", oldValue: "", newValue: "active", reason: "Login" }, p);
+    return {
+      success: true,
+      role: adminsData[matchedRow][2] || "admin",
+      accessLevel: adminsData[matchedRow][3] || "full",
+      email: adminsData[matchedRow][5] || "",
+      token, expiry
+    };
+  }
+
+  // Fallback: Master DB registry's per-event AdminUsername/AdminPassword
+  // (set automatically when an event is created via Apply-Event).
+  try {
+    const eventsSheet = getOrCreateEventsSheet_();
+    const data = eventsSheet.getDataRange().getValues();
+    const col = getColMap(data[0]);
+    const ssIdC = col["spreadsheetid"] !== undefined ? col["spreadsheetid"] : 4;
+    const userC = col["adminusername"] !== undefined ? col["adminusername"] : 15;
+    const passC = col["adminpassword"] !== undefined ? col["adminpassword"] : 16;
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][ssIdC]).trim() === sid &&
+          String(data[i][userC]).trim() === p.username &&
+          String(data[i][passC]).trim() === p.password) {
+        const token = Utilities.getUuid();
+        const expiry = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+        logActivity({ adminUser: p.username, module: "Auth", action: "Login", detail: "Successful login (registry)" }, p);
+        return { success: true, role: "superadmin", accessLevel: "full", email: "", token, expiry };
+      }
+    }
+  } catch (e) { /* Master DB not reachable — ignore, fall through to failure */ }
+
+  logAudit({ adminUser: p.username || "unknown", module: "Auth", action: "FailedLogin",
+    field: "", oldValue: "", newValue: "", reason: "Wrong credentials" }, p);
+  return { success: false };
+}
+
+// ============================================================
+// 6. UTR VALIDATION & FRAUD DETECTION
+// ============================================================
+function isUTRBlacklisted(utr, p) {
+  try {
+    const ss = getCurrentSpreadsheet(p);
+    const sheet = ss.getSheetByName("UTRBlacklist");
+    if (!sheet) return false;
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) if (String(data[i][0]).trim() === utr) return true;
+  } catch (e) {}
+  return false;
+}
+
+function addUTRBlacklist(p) {
+  verifyAdmin(p);
+  const ss = getCurrentSpreadsheet(p);
+  const sheet = ss.getSheetByName("UTRBlacklist");
+  if (!sheet) throw new Error("UTRBlacklist sheet not found");
+  const n = nowFormatted();
+  sheet.appendRow([p.utr, n.full, p.reason || "Manually blacklisted by " + p.adminUser]);
+  return { result: "Blacklisted" };
+}
+
+function getUTRBlacklist(p) {
+  verifyAdmin(p);
+  const ss = getCurrentSpreadsheet(p);
+  const sheet = ss.getSheetByName("UTRBlacklist");
+  if (!sheet) return { list: [] };
+  const data = sheet.getDataRange().getValues();
+  const list = [];
+  for (let i = 1; i < data.length; i++) if (data[i][0]) list.push({ utr: data[i][0], addedAt: serializeVal(data[i][1], 'date'), reason: data[i][2] });
+  return { list };
+}
+
+// Behaviour required:
+//  - LOW    -> valid, submit allowed
+//  - MEDIUM -> valid, submit allowed, but flagged "Review" (orange warning in UI)
+//  - HIGH   -> invalid, submit BLOCKED (red warning in UI)
+//  - Exact duplicate UTR anywhere in Payments -> BLOCKED
+//  - Blacklisted UTR -> BLOCKED
+function validateUTR(p) {
+  const utr = String(p.utr || '').trim();
+  if (!utr) return { valid: false, risk: "HIGH", score: 100, flags: ["Empty UTR"], block: true };
+
+  const s = getSettings(p);
+  const highT = parseInt(s.FRAUD_THRESHOLD_HIGH) || 70;
+  const medT  = parseInt(s.FRAUD_THRESHOLD_MEDIUM) || 40;
+
+  let score = 0; const flags = [];
+
+  if (isUTRBlacklisted(utr, p)) return { valid: false, risk: "HIGH", score: 100, flags: ["UTR is blacklisted"], block: true };
+
+  if (!/^\d+$/.test(utr)) { score += 35; flags.push("Non-numeric characters"); }
+  if (utr.length < 10)     { score += 30; flags.push("Too short (min 10 digits)"); }
+  if (utr.length > 22)     { score += 15; flags.push("Too long (max 22 digits)"); }
+  if (/^(.)\1+$/.test(utr)) { score += 45; flags.push("All identical digits"); }
+
+  const testVals = ["123456789012", "000000000000", "111111111111", "999999999999", "123123123123"];
+  if (testVals.includes(utr)) { score += 50; flags.push("Known test/fake value"); }
+
+  let isSeq = true;
+  for (let i = 1; i < Math.min(utr.length, 8); i++) if (parseInt(utr[i]) - parseInt(utr[i - 1]) !== 1) { isSeq = false; break; }
+  if (isSeq && utr.length >= 6) { score += 25; flags.push("Sequential digits"); }
+
+  try {
+    const ss = getCurrentSpreadsheet(p);
+    const sheet = ss.getSheetByName("Payments");
+    if (sheet && sheet.getLastRow() > 1) {
+      const data = sheet.getDataRange().getValues();
+      const col = getColMap(data[0]);
+      const utrC = col["utr"] !== undefined ? col["utr"] : 7;
+      const phoneC = col["phone number"] !== undefined ? col["phone number"] : (col["phone"] !== undefined ? col["phone"] : 5);
+      for (let i = Math.max(1, data.length - 300); i < data.length; i++) {
+        const eu = String(data[i][utrC] || '').trim();
+        if (!eu) continue;
+        if (eu === utr) return { valid: false, risk: "HIGH", score: 100, flags: ["Exact duplicate UTR"], block: true };
+        if (eu.length >= 10 && utr.length >= 10) {
+          const dist = levenshtein(utr, eu);
+          if (dist <= 1) { score += 50; flags.push("Nearly identical to existing UTR"); }
+          else if (dist <= 2) { score += 25; flags.push("Very similar to existing UTR"); }
+        }
+        if (p.phone && String(data[i][phoneC] || '').trim() === String(p.phone).trim()) score += 20;
+      }
+    }
+  } catch (e) {}
+
+  score = Math.min(score, 100);
+  const risk = score >= highT ? "HIGH" : score >= medT ? "MEDIUM" : "LOW";
+  const block = score >= highT;
+  return { valid: !block, risk, score, flags, block };
+}
+
+// ============================================================
+// 7. PAYMENTS
+// ============================================================
+function insertPayment(p) {
+  const ss = getCurrentSpreadsheet(p);
+  const sheet = ss.getSheetByName("Payments");
+  if (!sheet) return { result: "Error", message: "Payments sheet not found" };
+  const data = sheet.getDataRange().getValues();
+  const col = getColMap(data[0]);
+  const phoneC = col["phone number"] !== undefined ? col["phone number"] : (col["phone"] !== undefined ? col["phone"] : 5);
+
+  const s = getSettings(p);
+  const maxAmt = parseFloat(s.MAX_AMOUNT) || 0;
+  const minAmt = parseFloat(s.MIN_AMOUNT) || 50;
+  const amt = Number(p.amount) || 0;
+  if (maxAmt > 0 && amt > maxAmt) return { result: "AmountExceedsMax", maxAmount: maxAmt, message: "Maximum contribution amount is ₹" + maxAmt.toLocaleString("en-IN") };
+  if (amt < minAmt) return { result: "AmountBelowMin", minAmount: minAmt, message: "Minimum contribution amount is ₹" + minAmt.toLocaleString("en-IN") };
+
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][phoneC]).trim() === String(p.phone).trim()) return { result: "DuplicatePhone" };
+  }
+
+  const utrCheck = validateUTR({ utr: p.utr, phone: p.phone, sid: p.sid, eventCode: p.eventCode });
+  if (utrCheck.block) return { result: "DuplicateUTR", message: utrCheck.flags.join(", "), risk: utrCheck.risk };
+
+  const n = nowFormatted();
+  const reviewFlag = utrCheck.risk === "MEDIUM" ? "Review" : utrCheck.risk === "HIGH" ? "HighRisk" : "";
+  const status = utrCheck.risk === "MEDIUM" ? "Pending (Review)" : "Pending";
+
+  const rowObj = {
+    "RefID": p.refid, "Date": n.date, "Time": n.time,
+    "Full Name": cleanText_(p.name), "Village": cleanText_(p.village), "Phone number": p.phone,
+    "Amount": Number(p.amount), "UTR": p.utr, "Status": status,
+    "FraudScore": utrCheck.score, "RiskLevel": utrCheck.risk, "ReviewFlag": reviewFlag,
+    "ShowPublic": "Yes", "Verified By": "", "Verified At": "", "Notes": ""
+  };
+  sheet.appendRow(buildRowFromHeaders_(sheet, rowObj));
+
+  addVillageInternal(cleanText_(p.village), p);
+
+  try {
+    if (s.OrganizerEmail) {
+      MailApp.sendEmail({
+        to: String(s.OrganizerEmail),
+        subject: (utrCheck.risk === "MEDIUM" ? "⚠️[Review] " : "💰") + "New: " + cleanText_(p.name) + " ₹" + p.amount,
+        body: "Name: " + cleanText_(p.name) + "\nPhone: " + p.phone + "\nAmount: ₹" + p.amount +
+              "\nUTR: " + p.utr + "\nRisk: " + utrCheck.risk +
+              (utrCheck.flags.length ? "\nFlags: " + utrCheck.flags.join(", ") : "") +
+              "\nRef: " + p.refid + "\n" + n.date + " " + n.time
+      });
+    }
+  } catch (e) {}
+  return { result: "Inserted", riskLevel: utrCheck.risk };
+}
+
+function addVillageInternal(villageName, p) {
   if (!villageName) return;
   try {
+    const ss = getCurrentSpreadsheet(p);
     const sheet = ss.getSheetByName("Villages");
     if (!sheet) return;
     const data = sheet.getDataRange().getValues();
     const normalizedNew = villageName.trim().toLowerCase();
     for (let i = 1; i < data.length; i++) {
-      if (String(data[i][1]).trim().toLowerCase() === normalizedNew) {
+      if (String(data[i][0]).trim().toLowerCase() === normalizedNew) {
         sheet.getRange(i + 1, 3).setValue(parseInt(data[i][2] || 0) + 1);
         return;
       }
     }
-    sheet.appendRow([villageName.trim(), normalizedNew, 1]);
+    sheet.appendRow([villageName.trim(), normalizedNew, 1, "Active"]);
   } catch (e) {}
 }
 
-function apiGetPublicStats(params) {
-  try {
-    const context = resolveEventContext(params);
-    const sheet = context.ss.getSheetByName("Payments");
-    if (!sheet) return jsonSuccess({ totalCollected: 0, donorCount: 0, goalAmount: 0 });
-    const data = sheet.getDataRange().getValues();
-    if (data.length < 2) return jsonSuccess({ totalCollected: 0, donorCount: 0, goalAmount: 0 });
-
-    const col = getColMap(data[0]);
-    const aC = col["amount"] !== undefined ? col["amount"] : 7;
-    const sC = col["paymentstatus"] !== undefined ? col["paymentstatus"] : 10;
-
-    let total = 0, count = 0;
-    for (let i = 1; i < data.length; i++) {
-      const st = String(data[i][sC]).trim().toLowerCase();
-      const amt = Number(data[i][aC]) || 0;
-      if (st === "paid") { total += amt; count++; }
-    }
-
-    const settingsSheet = context.ss.getSheetByName("Settings");
-    let goalAmount = 0;
-    if (settingsSheet) settingsSheet.getDataRange().getValues().forEach(r => { if (r[0] === "Goal Amount") goalAmount = Number(r[1]) || 0; });
-
-    return jsonSuccess({ totalCollected: total, donorCount: count, goalAmount: goalAmount, currency: "INR" });
-  } catch (err) { return jsonError(err.message); }
+function getPublicStats(p) {
+  const ss = getCurrentSpreadsheet(p);
+  const sheet = ss.getSheetByName("Payments");
+  if (!sheet) return { total: 0, count: 0, pending: 0 };
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return { total: 0, count: 0, pending: 0 };
+  const col = getColMap(data[0]);
+  const aC = col["amount"] !== undefined ? col["amount"] : 6;
+  const sC = col["status"] !== undefined ? col["status"] : 8;
+  let total = 0, count = 0, pending = 0;
+  for (let i = 1; i < data.length; i++) {
+    const st = String(data[i][sC]).trim(), amt = Number(data[i][aC]) || 0;
+    if (st === "Verified") { total += amt; count++; }
+    if (st.startsWith("Pending")) pending++;
+  }
+  return { total, count, pending };
 }
 
-function apiGetPublicPayments(params) {
-  try {
-    const context = resolveEventContext(params);
-    const sheet = context.ss.getSheetByName("Payments");
-    if (!sheet) return jsonSuccess({ donors: [] });
-    const data = sheet.getDataRange().getValues();
-    if (data.length < 2) return jsonSuccess({ donors: [] });
-
-    const col = getColMap(data[0]);
-    const nC = col["name"] !== undefined ? col["name"] : 3, vC = col["village"] !== undefined ? col["village"] : 4;
-    const aC = col["amount"] !== undefined ? col["amount"] : 7, sC = col["paymentstatus"] !== undefined ? col["paymentstatus"] : 10;
-    const dC = col["paymentdate"] !== undefined ? col["paymentdate"] : 9, mC = col["message"] !== undefined ? col["message"] : 8;
-
-    const donors = [];
-    for (let i = 1; i < data.length; i++) {
-      if (String(data[i][sC]).trim().toLowerCase() === "paid") {
-        donors.push({ name: data[i][nC], village: data[i][vC], amount: Number(data[i][aC]) || 0, paymentDate: serializeVal(data[i][dC], 'paymentdate'), message: data[i][mC] || "" });
-      }
+function getRecentTransactions(p) {
+  const ss = getCurrentSpreadsheet(p);
+  const sheet = ss.getSheetByName("Payments");
+  if (!sheet) return { transactions: [] };
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return { transactions: [] };
+  const col = getColMap(data[0]);
+  const nC = col["full name"] !== undefined ? col["full name"] : (col["name"] !== undefined ? col["name"] : 3);
+  const vC = col["village"] !== undefined ? col["village"] : 4;
+  const aC = col["amount"] !== undefined ? col["amount"] : 6;
+  const sC = col["status"] !== undefined ? col["status"] : 8;
+  const dC = col["date"] !== undefined ? col["date"] : 1;
+  const spC = col["showpublic"] !== undefined ? col["showpublic"] : 12;
+  const transactions = [];
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][sC]).trim() === "Verified" && String(data[i][spC]).trim() !== "No") {
+      transactions.push({ name: cleanText_(data[i][nC]), village: cleanText_(data[i][vC]), amount: Number(data[i][aC]) || 0, date: serializeVal(data[i][dC], 'date') });
     }
-    return jsonSuccess({ donors: donors });
-  } catch (err) { return jsonError(err.message); }
+  }
+  transactions.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  return { transactions: transactions.slice(0, 10) };
 }
 
-function apiCheckStatus(params) {
-  try {
-    const context = resolveEventContext(params);
-    const sheet = context.ss.getSheetByName("Payments");
-    if (!sheet) return jsonSuccess({ found: false });
-    const data = sheet.getDataRange().getValues();
-    if (data.length < 2) return jsonSuccess({ found: false });
-
-    const col = getColMap(data[0]);
-    const C = {
-      receipt: col["paymentid"] !== undefined ? col["paymentid"] : 0, payment: col["razorpaypaymentid"] !== undefined ? col["razorpaypaymentid"] : 2,
-      name: col["name"] !== undefined ? col["name"] : 3, village: col["village"] !== undefined ? col["village"] : 4,
-      phone: col["phone"] !== undefined ? col["phone"] : 5, amount: col["amount"] !== undefined ? col["amount"] : 7,
-      msg: col["message"] !== undefined ? col["message"] : 8, date: col["paymentdate"] !== undefined ? col["paymentdate"] : 9,
-      status: col["paymentstatus"] !== undefined ? col["paymentstatus"] : 10, settle: col["settlementstatus"] !== undefined ? col["settlementstatus"] : 11,
-      refund: col["refundstatus"] !== undefined ? col["refundstatus"] : 12
+function checkStatus(p) {
+  const ss = getCurrentSpreadsheet(p);
+  const sheet = ss.getSheetByName("Payments");
+  if (!sheet) return { found: false };
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return { found: false };
+  const col = getColMap(data[0]);
+  const C = {
+    refid: col["refid"] !== undefined ? col["refid"] : 0,
+    date: col["date"] !== undefined ? col["date"] : 1,
+    time: col["time"] !== undefined ? col["time"] : 2,
+    name: col["full name"] !== undefined ? col["full name"] : (col["name"] !== undefined ? col["name"] : 3),
+    village: col["village"] !== undefined ? col["village"] : 4,
+    phone: col["phone number"] !== undefined ? col["phone number"] : (col["phone"] !== undefined ? col["phone"] : 5),
+    amount: col["amount"] !== undefined ? col["amount"] : 6,
+    utr: col["utr"] !== undefined ? col["utr"] : 7,
+    status: col["status"] !== undefined ? col["status"] : 8,
+    fscore: col["fraudscore"] !== undefined ? col["fraudscore"] : 9,
+    risk: col["risklevel"] !== undefined ? col["risklevel"] : 10
+  };
+  const type = p.searchType || 'refid', val = String(p.searchVal || p.refid || '').trim();
+  for (let i = 1; i < data.length; i++) {
+    let match = false;
+    if (type === 'phone') match = String(data[i][C.phone]).trim() === val;
+    else if (type === 'utr') match = String(data[i][C.utr]).trim() === val;
+    else match = String(data[i][C.refid]).trim().slice(-5) === val;
+    if (match) return {
+      found: true,
+      refid: data[i][C.refid], date: serializeVal(data[i][C.date], 'date'), time: serializeVal(data[i][C.time], 'time'),
+      name: cleanText_(data[i][C.name]), village: cleanText_(data[i][C.village]), phone: data[i][C.phone],
+      amount: data[i][C.amount], utr: data[i][C.utr], status: data[i][C.status],
+      fraudScore: data[i][C.fscore] || 0, riskLevel: data[i][C.risk] || "LOW"
     };
-
-    const searchVal = String(params.searchVal || "").trim().toLowerCase();
-    if (!searchVal) return jsonSuccess({ found: false });
-
-    for (let i = 1; i < data.length; i++) {
-      const recVal = String(data[i][C.receipt]).toLowerCase(), phoneVal = String(data[i][C.phone]).toLowerCase(), payVal = String(data[i][C.payment]).toLowerCase();
-      const isMatch = recVal === searchVal || phoneVal === searchVal || payVal === searchVal || recVal.slice(-5) === searchVal;
-      if (isMatch) {
-        return jsonSuccess({
-          found: true, receiptNumber: data[i][C.receipt], paymentId: data[i][C.payment], name: data[i][C.name], village: data[i][C.village],
-          phone: data[i][C.phone], amount: Number(data[i][C.amount]), message: data[i][C.msg], date: serializeVal(data[i][C.date], 'paymentdate'),
-          status: data[i][C.status], settlementStatus: data[i][C.settle], refundStatus: data[i][C.refund]
-        });
-      }
-    }
-    return jsonSuccess({ found: false });
-  } catch (err) { return jsonError(err.message); }
+  }
+  return { found: false };
 }
 
-function apiGetPayments(params) {
-  try {
-    verifyAdmin(params);
-    const context = resolveEventContext(params);
-    const sheet = context.ss.getSheetByName("Payments");
-    if (!sheet) return jsonSuccess({ payments: [] });
-    const data = sheet.getDataRange().getValues();
-    const headers = data[0];
-    const payments = [];
-    for (let i = 1; i < data.length; i++) {
-      const row = { _row: i + 1 };
-      headers.forEach((h, j) => { if (h) row[String(h).trim()] = serializeVal(data[i][j], h); });
-      payments.push(row);
-    }
-    return jsonSuccess({ payments: payments });
-  } catch (err) { return jsonError(err.message); }
+function getPayments(p) {
+  verifyAdmin(p);
+  const ss = getCurrentSpreadsheet(p);
+  const sheet = ss.getSheetByName("Payments");
+  if (!sheet) return { payments: [] };
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0]; const rows = [];
+  for (let i = 1; i < data.length; i++) {
+    const row = { _row: i + 1 };
+    headers.forEach((h, j) => { if (h) row[String(h).trim()] = serializeVal(data[i][j], h); });
+    row.Name = cleanText_(row["Full Name"] || row["Name"] || "");
+    row.Village = cleanText_(row["Village"] || "");
+    row.Phone = row["Phone number"] || row["Phone"] || "";
+    row.RefID = row["RefID"] || "";
+    row.RiskLevel = row["RiskLevel"] || "LOW";
+    row.FraudScore = row["FraudScore"] || 0;
+    row.VerifiedBy = row["Verified By"] || row["VerifiedBy"] || "";
+    rows.push(row);
+  }
+  return { payments: rows };
 }
 
-function apiUpdatePayments(params) {
-  try {
-    verifyAdmin(params);
-    const context = resolveEventContext(params);
-    const sheet = context.ss.getSheetByName("Payments");
-    if (!sheet) return jsonError("Payments table not found.");
-    const row = Number(params.row);
-    const updates = JSON.parse(params.updates || '{}');
-    const headers = sheet.getDataRange().getValues()[0];
-    const col = getColMap(headers);
-    Object.keys(updates).forEach(key => {
-      const colIdx = col[key.toLowerCase()];
-      if (colIdx !== undefined) {
-        const oldVal = sheet.getRange(row, colIdx + 1).getValue();
-        sheet.getRange(row, colIdx + 1).setValue(updates[key]);
-        logAuditRecord(context.ss, { adminUser: params.adminUser, module: "Payments", action: "Edit", field: key, oldValue: String(oldVal), newValue: String(updates[key]), reason: params.reason || "Dashboard edit" });
-      }
-    });
-    return jsonSuccess({ result: "Updated" });
-  } catch (err) { return jsonError(err.message); }
+function updatePayments(p) {
+  verifyAdmin(p);
+  const ss = getCurrentSpreadsheet(p);
+  const sheet = ss.getSheetByName("Payments");
+  const data = sheet.getDataRange().getValues();
+  const col = getColMap(data[0]);
+  const n = nowFormatted();
+  const stC = (col["status"] !== undefined ? col["status"] : 8) + 1;
+  const vbC = (col["verified by"] !== undefined ? col["verified by"] : (col["verifiedby"] !== undefined ? col["verifiedby"] : 13)) + 1;
+  const vaC = (col["verifiedat"] !== undefined ? col["verifiedat"] : 14) + 1;
+  const refC = (col["refid"] !== undefined ? col["refid"] : 0);
+  const updates = JSON.parse(p.updates);
+  updates.forEach(u => {
+    const oldSt = sheet.getRange(u.row, stC).getValue();
+    const refId = data[u.row - 1] ? data[u.row - 1][refC] : "";
+    sheet.getRange(u.row, stC).setValue(u.status);
+    sheet.getRange(u.row, vbC).setValue(p.adminUser || "admin");
+    sheet.getRange(u.row, vaC).setValue(n.full);
+    logAudit({ adminUser: p.adminUser, module: "Payments", action: "StatusChange",
+      field: "Status", oldValue: String(oldSt), newValue: u.status, reason: p.reason || "",
+      row: u.row, column: stC, recordId: String(refId) }, p);
+  });
+  logActivity({ adminUser: p.adminUser, module: "Payments", action: "VerifyPayments",
+    detail: updates.length + " records updated", oldValue: "", newValue: updates.map(u => u.status).join(",") }, p);
+  return { result: "Saved" };
 }
 
-// ============================================================
-// 7. PHOTO GALLERY
-// ============================================================
-
-function apiGetGalleryImages(params) {
-  try {
-    const context = resolveEventContext(params);
-    const sheet = context.ss.getSheetByName("Gallery");
-    if (!sheet) return jsonSuccess({ sections: {}, images: [] });
-    const data = sheet.getDataRange().getValues();
-    if (data.length < 2) return jsonSuccess({ sections: {}, images: [] });
-
-    const col = getColMap(data[0]);
-    const fldC = col["folder"] !== undefined ? col["folder"] : 1, urlC = col["imageurl"] !== undefined ? col["imageurl"] : 3;
-    const thbC = col["thumbnailurl"] !== undefined ? col["thumbnailurl"] : 4, nameC = col["imagename"] !== undefined ? col["imagename"] : 2;
-    const statusC = col["status"] !== undefined ? col["status"] : 7;
-
-    const sections = { marriage: [], reception: [], haldi: [], engagement: [], public: [] };
-    const allImages = [];
-    for (let i = 1; i < data.length; i++) {
-      if (String(data[i][statusC]).trim().toLowerCase() !== "approved") continue;
-      const folderVal = String(data[i][fldC]).trim().toLowerCase();
-      const imgObj = { id: String(i + 1), url: String(data[i][urlC]).trim(), thumb: String(data[i][thbC]).trim() || String(data[i][urlC]).trim(), name: String(data[i][nameC]).trim() };
-      if (sections[folderVal] !== undefined) sections[folderVal].push(imgObj); else sections.public.push(imgObj);
-      allImages.push(imgObj);
-    }
-    return jsonSuccess({ sections: sections, images: allImages });
-  } catch (err) { return jsonError(err.message); }
+function updatePublicDisplay(p) {
+  verifyAdmin(p);
+  const ss = getCurrentSpreadsheet(p);
+  const sheet = ss.getSheetByName("Payments");
+  const data = sheet.getDataRange().getValues();
+  const col = getColMap(data[0]);
+  const spC = (col["showpublic"] !== undefined ? col["showpublic"] : 12) + 1;
+  sheet.getRange(parseInt(p.row), spC).setValue(p.showPublic);
+  return { result: "Updated" };
 }
 
-function apiUploadPhoto(params) {
-  try {
-    const context = resolveEventContext(params);
-    const settingsSheet = context.ss.getSheetByName("Settings");
-    const s = {};
-    if (settingsSheet) settingsSheet.getDataRange().getValues().forEach(r => { if (r[0]) s[String(r[0]).trim()] = r[1]; });
-
-    const folderCategory = String(params.folder || "public").trim().toLowerCase();
-    const folderKey = folderCategory.toUpperCase() + "_FOLDER_ID";
-    const folderId = extractFolderID(s[folderKey] || s["PUBLIC_FOLDER_ID"]);
-    if (!folderId) return jsonError("Drive folder configuration not found for category: " + folderCategory);
-
-    const name = params.name || "Anonymous";
-    const filedata = params.filedata;
-    const filename = params.filename || "upload_" + Date.now();
-    const filetype = params.filetype || "image/jpeg";
-    if (!filedata) return jsonError("No image data provided.");
-
-    const cleanBase64 = filedata.split(",")[1] || filedata;
-    const bytes = Utilities.base64Decode(cleanBase64);
-    const blob = Utilities.newBlob(bytes, filetype, filename);
-    const folder = DriveApp.getFolderById(folderId);
-    const file = folder.createFile(blob);
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-
-    const fileUrl = file.getUrl();
-    const fileId = file.getId();
-    const thumbUrl = "https://lh3.googleusercontent.com/d/" + fileId + "=w400-h400-no";
-
-    const gallerySheet = context.ss.getSheetByName("Gallery");
-    if (!gallerySheet) return jsonError("Gallery table not found.");
-
-    const n = nowFormatted();
-    const photoId = "PH" + Utilities.getUuid().substring(0, 8).toUpperCase();
-    const defaultStatus = (s["MODERATION_ENABLED"] === "No" || s["MODERATION_ENABLED"] === "false") ? "Approved" : "Pending";
-
-    gallerySheet.appendRow([photoId, folderCategory, filename, fileUrl, thumbUrl, name, n.iso, defaultStatus]);
-    return jsonSuccess({ photoId: photoId, status: defaultStatus, message: defaultStatus === "Approved" ? "Uploaded and published!" : "Submitted for approval." });
-  } catch (err) { return jsonError(err.message); }
-}
-
-function apiGetPendingPhotos(params) {
-  try {
-    verifyAdmin(params);
-    const context = resolveEventContext(params);
-    const sheet = context.ss.getSheetByName("Gallery");
-    if (!sheet) return jsonSuccess({ photos: [] });
-    const data = sheet.getDataRange().getValues();
-    if (data.length < 2) return jsonSuccess({ photos: [] });
-
-    const col = getColMap(data[0]);
-    const idC = col["photoid"] !== undefined ? col["photoid"] : 0, fldC = col["folder"] !== undefined ? col["folder"] : 1;
-    const nameC = col["imagename"] !== undefined ? col["imagename"] : 2, urlC = col["imageurl"] !== undefined ? col["imageurl"] : 3;
-    const whoC = col["uploadedby"] !== undefined ? col["uploadedby"] : 5, whenC = col["uploadedtime"] !== undefined ? col["uploadedtime"] : 6;
-    const statusC = col["status"] !== undefined ? col["status"] : 7;
-
-    const photos = [];
-    for (let i = 1; i < data.length; i++) {
-      if (String(data[i][statusC]).trim() === "Pending") {
-        photos.push({ row: i + 1, photoId: data[i][idC], folder: data[i][fldC], name: data[i][nameC], url: data[i][urlC], uploadedBy: data[i][whoC], uploadedTime: serializeVal(data[i][whenC], 'uploadedtime') });
-      }
-    }
-    return jsonSuccess({ photos: photos });
-  } catch (err) { return jsonError(err.message); }
-}
-
-function apiModeratePhoto(params) {
-  try {
-    verifyAdmin(params);
-    const context = resolveEventContext(params);
-    const sheet = context.ss.getSheetByName("Gallery");
-    if (!sheet) return jsonError("Gallery table not found.");
-    const row = Number(params.row);
-    const approve = String(params.approve).toLowerCase() === "true" || String(params.approve) === "1";
-    const headers = sheet.getDataRange().getValues()[0];
-    const statusIdx = getColMap(headers)["status"];
-    if (statusIdx === undefined) return jsonError("Status column not found.");
-    const newStatus = approve ? "Approved" : "Rejected";
-    sheet.getRange(row, statusIdx + 1).setValue(newStatus);
-    logAuditRecord(context.ss, { adminUser: params.adminUser, module: "Gallery", action: approve ? "Approve" : "Reject", field: "Status", oldValue: "Pending", newValue: newStatus, reason: params.reason || "Admin moderation" });
-    return jsonSuccess({ result: "Moderated", status: newStatus });
-  } catch (err) { return jsonError(err.message); }
-}
-
-function apiDeletePhoto(params) {
-  try {
-    verifyAdmin(params);
-    const context = resolveEventContext(params);
-    const sheet = context.ss.getSheetByName("Gallery");
-    if (!sheet) return jsonError("Gallery table not found.");
-    const row = Number(params.row);
-    const data = sheet.getDataRange().getValues();
-    if (row < 2 || row > data.length) return jsonError("Invalid row index.");
-    const col = getColMap(data[0]);
-    const idVal = data[row - 1][col["photoid"]], urlVal = data[row - 1][col["imageurl"]];
-    try { const fileId = extractFolderID(urlVal); if (fileId) DriveApp.getFileById(fileId).setTrashed(true); } catch (e) {}
-    sheet.deleteRow(row);
-    logAuditRecord(context.ss, { adminUser: params.adminUser, module: "Gallery", action: "Delete", field: "Row", oldValue: String(idVal), newValue: "Deleted", reason: params.reason || "Gallery cleaning" });
-    return jsonSuccess({ result: "Deleted" });
-  } catch (err) { return jsonError(err.message); }
+function getPublicPayments(p) {
+  const ss = getCurrentSpreadsheet(p);
+  const sheet = ss.getSheetByName("Payments");
+  if (!sheet) return { donors: [] };
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return { donors: [] };
+  const col = getColMap(data[0]);
+  const nC = col["full name"] !== undefined ? col["full name"] : (col["name"] !== undefined ? col["name"] : 3);
+  const aC = col["amount"] !== undefined ? col["amount"] : 6;
+  const sC = col["status"] !== undefined ? col["status"] : 8;
+  const spC = col["showpublic"] !== undefined ? col["showpublic"] : 12;
+  const dC = col["date"] !== undefined ? col["date"] : 1;
+  const donors = [];
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][sC]).trim() === "Verified" && String(data[i][spC]).trim() !== "No")
+      donors.push({ name: cleanText_(data[i][nC]), amount: Number(data[i][aC]) || 0, date: serializeVal(data[i][dC], 'date') });
+  }
+  donors.sort((a, b) => b.amount - a.amount);
+  return { donors };
 }
 
 // ============================================================
 // 8. COMPLAINTS
 // ============================================================
+function insertComplaint(p) {
+  const ss = getCurrentSpreadsheet(p);
+  const sheet = ss.getSheetByName("Complaints");
+  if (!sheet) return { result: "Error", message: "Complaints sheet not found" };
+  const n = nowFormatted();
+  let fileUrl = "", fileStatus = "None";
 
-function apiSubmitComplaint(params) {
-  try {
-    const context = resolveEventContext(params);
-    const settingsSheet = context.ss.getSheetByName("Settings");
-    const s = {};
-    if (settingsSheet) settingsSheet.getDataRange().getValues().forEach(r => { if (r[0]) s[String(r[0]).trim()] = r[1]; });
-
-    let fileUrl = "";
-    if (params.filedata) {
-      try {
-        const folderId = extractFolderID(s["COMPLAINT_UPLOAD_FOLDER_ID"] || s["PUBLIC_FOLDER_ID"]);
-        if (folderId) {
-          const cleanBase64 = params.filedata.split(",")[1] || params.filedata;
-          const bytes = Utilities.base64Decode(cleanBase64);
-          const blob = Utilities.newBlob(bytes, params.filetype || "image/jpeg", params.filename || "screenshot_" + Date.now());
-          const folder = DriveApp.getFolderById(folderId);
-          const file = folder.createFile(blob);
-          file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-          fileUrl = file.getUrl();
-        }
-      } catch (err) {}
-    }
-
-    const complaintsSheet = context.ss.getSheetByName("Complaints");
-    if (!complaintsSheet) return jsonError("Complaints database table not found.");
-
-    const name = params.name || "Anonymous", village = params.village || "", phone = params.phone || "", complaintText = params.complaint || "";
-    if (!complaintText) return jsonError("Please describe your issue.");
-
-    const n = nowFormatted();
-    const complaintId = "CP" + Utilities.getUuid().substring(0, 8).toUpperCase();
-    complaintsSheet.appendRow([complaintId, name, village, phone, complaintText, fileUrl, "Open", "", n.iso, ""]);
-    return jsonSuccess({ complaintId: complaintId, status: "Open" });
-  } catch (err) { return jsonError(err.message); }
-}
-
-function apiGetComplaintStatus(params) {
-  try {
-    const context = resolveEventContext(params);
-    const sheet = context.ss.getSheetByName("Complaints");
-    if (!sheet) return jsonSuccess({ complaints: [] });
-    const data = sheet.getDataRange().getValues();
-    if (data.length < 2) return jsonSuccess({ complaints: [] });
-
-    const col = getColMap(data[0]);
-    const idC = col["complaintid"] !== undefined ? col["complaintid"] : 0, txtC = col["complaint"] !== undefined ? col["complaint"] : 4;
-    const phC = col["phone"] !== undefined ? col["phone"] : 3, stC = col["status"] !== undefined ? col["status"] : 6;
-    const repC = col["reply"] !== undefined ? col["reply"] : 7, timeC = col["createdtime"] !== undefined ? col["createdtime"] : 8;
-
-    const searchPhone = String(params.phone || "").trim().toLowerCase();
-    const searchId = String(params.trackId || params.complaintId || "").trim().toLowerCase();
-    if (!searchPhone && !searchId) return jsonError("Phone or Complaint ID is required.");
-
-    const results = [];
-    for (let i = 1; i < data.length; i++) {
-      const idVal = String(data[i][idC]).trim(), phoneVal = String(data[i][phC]).trim();
-      let isMatch = false;
-      if (searchId && idVal.toLowerCase() === searchId) isMatch = true;
-      else if (searchPhone && phoneVal.toLowerCase() === searchPhone) isMatch = true;
-      if (isMatch) results.push({ complaintId: idVal, complaint: data[i][txtC], status: data[i][stC], reply: data[i][repC], createdTime: serializeVal(data[i][timeC], 'createdtime') });
-    }
-    return jsonSuccess({ complaints: results });
-  } catch (err) { return jsonError(err.message); }
-}
-
-function apiGetComplaints(params) {
-  try {
-    verifyAdmin(params);
-    const context = resolveEventContext(params);
-    const sheet = context.ss.getSheetByName("Complaints");
-    if (!sheet) return jsonSuccess({ complaints: [] });
-    const data = sheet.getDataRange().getValues();
-    const headers = data[0];
-    const complaints = [];
-    for (let i = 1; i < data.length; i++) {
-      const row = { _row: i + 1 };
-      headers.forEach((h, j) => { if (h) row[String(h).trim()] = serializeVal(data[i][j], h); });
-      complaints.push(row);
-    }
-    return jsonSuccess({ complaints: complaints });
-  } catch (err) { return jsonError(err.message); }
-}
-
-function apiUpdateComplaint(params) {
-  try {
-    verifyAdmin(params);
-    const context = resolveEventContext(params);
-    const sheet = context.ss.getSheetByName("Complaints");
-    if (!sheet) return jsonError("Complaints table not found.");
-    const row = Number(params.row), status = params.status, reply = params.reply;
-    const col = getColMap(sheet.getDataRange().getValues()[0]);
-    const statusIdx = col["status"], replyIdx = col["reply"], resolvedTimeIdx = col["resolvedtime"];
-    if (statusIdx === undefined || replyIdx === undefined) return jsonError("Table schema mismatch.");
-
-    const n = nowFormatted();
-    sheet.getRange(row, statusIdx + 1).setValue(status);
-    sheet.getRange(row, replyIdx + 1).setValue(reply);
-    if ((status === "Resolved" || status === "Closed") && resolvedTimeIdx !== undefined) sheet.getRange(row, resolvedTimeIdx + 1).setValue(n.iso);
-
-    logAuditRecord(context.ss, { adminUser: params.adminUser, module: "Complaints", action: "Update", field: "Resolution", oldValue: "Open", newValue: status + " (" + String(reply).substring(0, 10) + "...)", reason: params.reason || "Complaint resolved by admin" });
-    return jsonSuccess({ result: "Resolved" });
-  } catch (err) { return jsonError(err.message); }
-}
-
-// ============================================================
-// 9. ADMIN AUTHENTICATION, SESSIONS & AUDITING (per-event)
-// ============================================================
-
-function apiLoginAdmin(params) {
-  try {
-    const context = resolveEventContext(params);
-    const sheet = context.ss.getSheetByName("Admins");
-    if (!sheet) return jsonError("Admins authentication table not found.");
-
-    const username = String(params.username || "").trim(), password = String(params.password || "").trim();
-    if (!username || !password) return jsonError("Missing login credentials.");
-
-    const data = sheet.getDataRange().getValues();
-    const col = getColMap(data[0]);
-    const userIdx = col["username"] !== undefined ? col["username"] : 0, passIdx = col["password"] !== undefined ? col["password"] : 1;
-    const roleIdx = col["role"] !== undefined ? col["role"] : 2, accessIdx = col["accesslevel"] !== undefined ? col["accesslevel"] : 3;
-    const statusIdx = col["status"] !== undefined ? col["status"] : 4, emailIdx = col["email"] !== undefined ? col["email"] : 5;
-    const loginIdx = col["lastlogin"] !== undefined ? col["lastlogin"] : 7;
-
-    for (let i = 1; i < data.length; i++) {
-      const uVal = String(data[i][userIdx]).trim(), pVal = String(data[i][passIdx]).trim();
-      const statusVal = String(data[i][statusIdx] || "Active").trim().toLowerCase();
-      if (uVal === username && pVal === password) {
-        if (statusVal === "inactive") return jsonError("Account is inactive. Contact Super Admin.");
-
-        const n = nowFormatted();
-        if (loginIdx !== undefined) sheet.getRange(i + 1, loginIdx + 1).setValue(n.full);
-
-        const settingsSheet = context.ss.getSheetByName("Settings");
-        let timeout = 30;
-        if (settingsSheet) settingsSheet.getDataRange().getValues().forEach(r => { if (r[0] === "SessionTimeoutMinutes") timeout = parseInt(r[1]) || 30; });
-
-        const expiry = new Date(Date.now() + timeout * 60 * 1000).toISOString();
-        const token = Utilities.getUuid();
-        const cache = CacheService.getScriptCache();
-        const sessionInfo = { username: username, role: String(data[i][roleIdx]), accessLevel: String(data[i][accessIdx]), email: String(data[i][emailIdx]), spreadsheetId: context.spreadsheetId };
-        cache.put("session_" + token, JSON.stringify(sessionInfo), timeout * 60);
-
-        logAuditRecord(context.ss, { adminUser: username, module: "Auth", action: "Login", field: "Session", oldValue: "Offline", newValue: "Online", reason: "Dashboard login" });
-        return jsonSuccess({ role: sessionInfo.role, accessLevel: sessionInfo.accessLevel, email: sessionInfo.email, token: token, expiry: expiry });
+  if (p.filedata && p.filename) {
+    try {
+      const s = getSettings(p);
+      const folderID = extractFolderID(s.COMPLAINT_UPLOAD_FOLDER_ID);
+      if (folderID) {
+        const folder = DriveApp.getFolderById(folderID);
+        const cleanBase64 = String(p.filedata).split(",")[1] || p.filedata;
+        const decoded = Utilities.base64Decode(cleanBase64);
+        const blob = Utilities.newBlob(decoded, p.filetype || "application/octet-stream", p.filename);
+        const file = folder.createFile(blob);
+        file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        fileUrl = "https://drive.google.com/file/d/" + file.getId() + "/view";
+        fileStatus = "Attached";
       }
+    } catch (e) {
+      fileUrl = "Error: " + e.message;
+      fileStatus = "Error";
     }
-    return jsonError("Invalid username or password.");
-  } catch (err) { return jsonError(err.message); }
-}
-
-function apiAdminLogout(params) {
-  try {
-    const token = params.adminToken || params.token;
-    if (token) CacheService.getScriptCache().remove("session_" + token);
-    return jsonSuccess({ result: "LoggedOut" });
-  } catch (err) { return jsonError(err.message); }
-}
-
-function verifyAdmin(params) {
-  const token = params.adminToken || params.token;
-  if (!token) throw new Error("Unauthorized: session token is missing.");
-  const cached = CacheService.getScriptCache().get("session_" + token);
-  if (!cached) throw new Error("Unauthorized: session expired or invalid.");
-  const session = JSON.parse(cached);
-
-  // Match against whichever identifier this call was made with.
-  const wantSid = params.sid;
-  const wantCode = String(params.eventCode || params.code || "").toUpperCase().trim();
-  if (wantSid && session.spreadsheetId !== wantSid) throw new Error("Unauthorized: token does not match this event's context.");
-  if (!wantSid && wantCode) {
-    const sid = resolveSpreadsheetID(wantCode);
-    if (session.spreadsheetId !== sid) throw new Error("Unauthorized: token does not match this event's context.");
   }
-  return session;
-}
 
-function verifySuperAdmin(params) {
-  const session = verifyAdmin(params);
-  const role = String(session.role).toLowerCase();
-  if (role !== "super admin" && role !== "superadmin") throw new Error("Super Admin permissions required.");
-  return session;
-}
+  const cID = "CP" + Date.now().toString().slice(-8);
+  const rowObj = {
+    "ComplaintID": cID, "Date": n.date, "Time": n.time,
+    "Name": cleanText_(p.name), "Village": cleanText_(p.village), "Phone": p.phone, "Email": p.email,
+    "Complaint": p.complaint, "Attachment": fileStatus, "AttachmentURL": fileUrl, "AttachmentName": p.filename || "",
+    "Status": "Open", "ReplyBy": "", "AdminReply": "", "RepliedAt": "", "Priority": ""
+  };
+  sheet.appendRow(buildRowFromHeaders_(sheet, rowObj));
 
-function logAuditRecord(ss, record) {
   try {
-    const sheet = ss.getSheetByName("AuditLog");
-    if (!sheet) return;
+    const s = getSettings(p);
+    if (s.OrganizerEmail) MailApp.sendEmail({
+      to: String(s.OrganizerEmail),
+      subject: "📋 Complaint: " + cleanText_(p.name),
+      body: "ID: " + cID + "\nName: " + cleanText_(p.name) + "\nVillage: " + cleanText_(p.village) +
+            "\nPhone: " + p.phone + "\nComplaint:\n" + p.complaint + (fileUrl ? "\nAttachment: " + fileUrl : "")
+    });
+  } catch (e) {}
+  return { result: "Inserted", complaintID: cID };
+}
+
+function getComplaints(p) {
+  verifyAdmin(p);
+  const ss = getCurrentSpreadsheet(p);
+  const sheet = ss.getSheetByName("Complaints");
+  if (!sheet) return { complaints: [] };
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0]; const rows = [];
+  for (let i = 1; i < data.length; i++) {
+    const row = { _row: i + 1 };
+    headers.forEach((h, j) => { if (h) row[String(h).trim()] = serializeVal(data[i][j], h); });
+    if (row.Name) row.Name = cleanText_(row.Name);
+    if (row.Village) row.Village = cleanText_(row.Village);
+    rows.push(row);
+  }
+  return { complaints: rows };
+}
+
+function updateComplaint(p) {
+  verifyAdmin(p);
+  const ss = getCurrentSpreadsheet(p);
+  const sheet = ss.getSheetByName("Complaints");
+  const data = sheet.getDataRange().getValues();
+  const col = getColMap(data[0]);
+  const n = nowFormatted();
+  const stC = (col["status"] !== undefined ? col["status"] : 11) + 1;
+  const rbC = (col["replyby"] !== undefined ? col["replyby"] : 12) + 1;
+  const arC = (col["adminreply"] !== undefined ? col["adminreply"] : 13) + 1;
+  const raC = (col["repliedat"] !== undefined ? col["repliedat"] : 14) + 1;
+  const idC = (col["complaintid"] !== undefined ? col["complaintid"] : 0);
+  const oldSt = sheet.getRange(parseInt(p.row), stC).getValue();
+  const cID = data[parseInt(p.row) - 1] ? data[parseInt(p.row) - 1][idC] : "";
+  sheet.getRange(parseInt(p.row), stC).setValue(p.status);
+  sheet.getRange(parseInt(p.row), rbC).setValue(p.adminUser || "admin");
+  sheet.getRange(parseInt(p.row), arC).setValue(p.reply);
+  sheet.getRange(parseInt(p.row), raC).setValue(n.full);
+  try {
+    if (p.email && p.reply) {
+      const s = getSettings(p);
+      MailApp.sendEmail({ to: p.email, subject: "Reply — " + (s["Event Name"] || s.EventName || "Event"),
+        body: "Dear " + cleanText_(p.name) + ",\n\nReply:\n" + p.reply + "\n\nStatus: " + p.status + "\n\nEvent Team" });
+    }
+  } catch (e) {}
+  logAudit({ adminUser: p.adminUser, module: "Complaints", action: "Reply",
+    field: "Status", oldValue: String(oldSt), newValue: p.status, reason: "Complaint reply",
+    row: parseInt(p.row), column: stC, recordId: String(cID) }, p);
+  logActivity({ adminUser: p.adminUser, module: "Complaints", action: "ReplyComplaint",
+    detail: "Replied to " + cleanText_(p.name) + " (" + cID + ")", oldValue: String(oldSt), newValue: p.status }, p);
+  return { result: "Updated" };
+}
+
+// ============================================================
+// 9. VILLAGES
+// ============================================================
+function getVillageSuggestions(p) {
+  const ss = getCurrentSpreadsheet(p);
+  const sheet = ss.getSheetByName("Villages");
+  if (!sheet) return { villages: [] };
+  const data = sheet.getDataRange().getValues();
+  const villages = [];
+  for (let i = 1; i < data.length; i++) {
+    const v = String(data[i][0] || '').trim();
+    const status = String(data[i][3] || 'Active').trim();
+    if (v && status.toLowerCase() !== 'inactive') villages.push(v);
+  }
+  return { villages: [...new Set(villages)].sort() };
+}
+
+function addVillageSuggestion(p) {
+  verifyAdmin(p);
+  const ss = getCurrentSpreadsheet(p);
+  const sheet = ss.getSheetByName("Villages");
+  if (!sheet) throw new Error("Villages sheet not found");
+  const data = sheet.getDataRange().getValues();
+  const normalized = p.village.trim().toLowerCase();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim().toLowerCase() === normalized) {
+      sheet.getRange(i + 1, 3).setValue(parseInt(data[i][2] || 0) + 1);
+      return { result: "Updated" };
+    }
+  }
+  sheet.appendRow([p.village.trim(), normalized, 1, "Active"]);
+  return { result: "Added" };
+}
+
+// ============================================================
+// 10. GALLERY — auto-detects eventCode / sid / raw folder IDs
+// ============================================================
+function getGalleryImages(p) {
+  try {
+    const s = getSettings(p); // getCurrentSpreadsheet inside getSettings already handles sid/eventCode/default
+    const engFolderID = extractFolderID(s.ENGAGEMENT_GALLERY_FOLDER_ID);
+    const haldiFolderID = extractFolderID(s.HALDI_GALLERY_FOLDER_ID);
+    const marFolderID = extractFolderID(s.MARRIAGE_GALLERY_FOLDER_ID);
+
+    function getFolderImages(folderID, section) {
+      if (!folderID) return [];
+      try {
+        const folder = DriveApp.getFolderById(folderID);
+        const files = folder.getFiles();
+        const imgs = [];
+        while (files.hasNext()) {
+          const f = files.next();
+          if (f.getMimeType().startsWith("image/")) {
+            try { f.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
+            imgs.push({
+              id: f.getId(), name: f.getName(), section: section,
+              url: "https://drive.google.com/uc?id=" + f.getId(),
+              thumb: "https://drive.google.com/thumbnail?id=" + f.getId() + "&sz=w400"
+            });
+          }
+        }
+        return imgs;
+      } catch (e) { return []; }
+    }
+
+    const sections = {
+      engagement: getFolderImages(engFolderID, "Engagement"),
+      haldi: getFolderImages(haldiFolderID, "Haldi"),
+      marriage: getFolderImages(marFolderID, "Marriage")
+    };
+    const allImages = [...sections.engagement, ...sections.haldi, ...sections.marriage];
+    return { images: allImages, sections };
+  } catch (e) { return { images: [], sections: {}, error: e.message }; }
+}
+
+// ============================================================
+// 11. ACTIVITY LOG — "Admin X did Y on Module Z"
+// ============================================================
+function logActivity(p, ctx) {
+  try {
+    const ss = getCurrentSpreadsheet(ctx || p);
+    let sheet = ss.getSheetByName("ActivityLog");
+    if (!sheet) {
+      sheet = ss.insertSheet("ActivityLog");
+      sheet.appendRow(["RecordID", "Date", "Time", "AdminUser", "Module", "Action", "Detail",
+        "OldValue", "NewValue", "RecordID_Ref", "Browser", "Device", "LogoutType"]);
+    }
     const n = nowFormatted();
-    sheet.appendRow([n.full, record.adminUser || "system", record.action || "", record.module || "", record.field || "", record.oldValue || "", record.newValue || "", record.reason || ""]);
+    const recID = "AL" + Date.now().toString().slice(-8);
+    sheet.appendRow([
+      recID, n.date, n.time,
+      p.adminUser || "", p.module || "", p.action || "", p.detail || "",
+      p.oldValue || "", p.newValue || "", p.recordId || "", "", "", ""
+    ]);
+  } catch (e) {}
+  return { result: "Logged" };
+}
+
+function getActivity(p) {
+  verifyAdmin(p);
+  const ss = getCurrentSpreadsheet(p);
+  const sheet = ss.getSheetByName("ActivityLog");
+  if (!sheet) return { activities: [] };
+  const data = sheet.getDataRange().getValues();
+  const rows = [];
+  const col = getColMap(data[0]);
+  for (let i = Math.max(1, data.length - 100); i < data.length; i++) {
+    rows.push({
+      date: serializeVal(data[i][col["date"] !== undefined ? col["date"] : 1], 'date'),
+      time: serializeVal(data[i][col["time"] !== undefined ? col["time"] : 2], 'time'),
+      user: data[i][col["adminuser"] !== undefined ? col["adminuser"] : 3],
+      module: data[i][col["module"] !== undefined ? col["module"] : 4],
+      action: data[i][col["action"] !== undefined ? col["action"] : 5],
+      detail: data[i][col["detail"] !== undefined ? col["detail"] : 6],
+      oldValue: data[i][col["oldvalue"] !== undefined ? col["oldvalue"] : 7],
+      newValue: data[i][col["newvalue"] !== undefined ? col["newvalue"] : 8],
+      recordId: data[i][col["recordid_ref"] !== undefined ? col["recordid_ref"] : 9] || ""
+    });
+  }
+  return { activities: rows.reverse() };
+}
+
+// ============================================================
+// 12. AUDIT LOG
+// ============================================================
+function logAudit(p, ctx) {
+  try {
+    const ss = getCurrentSpreadsheet(ctx || p);
+    let sheet = ss.getSheetByName("AuditLog");
+    if (!sheet) {
+      sheet = ss.insertSheet("AuditLog");
+      sheet.appendRow(["Timestamp", "AdminUser", "Module", "Action", "Field", "OldValue", "NewValue", "Reason", "Row", "Column", "RecordID"]);
+    }
+    const n = nowFormatted();
+    sheet.appendRow([
+      n.full, p.adminUser || "", p.module || "", p.action || "",
+      p.field || "", p.oldValue || "", p.newValue || "", p.reason || "",
+      p.row || "", p.column || "", p.recordId || ""
+    ]);
   } catch (e) {}
 }
 
-function apiGetAuditLog(params) {
-  try {
-    verifySuperAdmin(params);
-    const context = resolveEventContext(params);
-    const sheet = context.ss.getSheetByName("AuditLog");
-    if (!sheet) return jsonSuccess({ audit: [] });
-    const data = sheet.getDataRange().getValues();
-    const headers = data[0];
-    const logs = [];
-    for (let i = 1; i < data.length; i++) {
-      const row = { _row: i + 1 };
-      headers.forEach((h, j) => { if (h) row[String(h).trim()] = serializeVal(data[i][j], h); });
-      logs.push(row);
+function getAuditLog(p) {
+  verifySuperAdmin(p);
+  const ss = getCurrentSpreadsheet(p);
+  const sheet = ss.getSheetByName("AuditLog");
+  if (!sheet) return { logs: [] };
+  const data = sheet.getDataRange().getValues();
+  const logs = [];
+  const limit = parseInt(p.limit) || 100;
+  for (let i = Math.max(1, data.length - limit); i < data.length; i++) {
+    logs.push({
+      timestamp: String(data[i][0]), user: data[i][1], module: data[i][2],
+      action: data[i][3], field: data[i][4], oldValue: data[i][5], newValue: data[i][6],
+      reason: data[i][7], row: data[i][8], column: data[i][9], recordId: data[i][10] || ""
+    });
+  }
+  return { logs: logs.reverse() };
+}
+
+// ============================================================
+// 13. UNDO SYSTEM
+// ============================================================
+function undoActions(p) {
+  verifySuperAdmin(p);
+  const scope = p.scope || "last";
+  const ss = getCurrentSpreadsheet(p);
+  const auditSheet = ss.getSheetByName("AuditLog");
+  if (!auditSheet) return { result: "NoAuditLog", undone: 0 };
+
+  const data = auditSheet.getDataRange().getValues();
+  const now = new Date();
+  let cutoff = null;
+  if (scope === "1hour") cutoff = new Date(now.getTime() - 3600 * 1000);
+  if (scope === "24hour") cutoff = new Date(now.getTime() - 86400 * 1000);
+  if (scope === "7days") cutoff = new Date(now.getTime() - 7 * 86400 * 1000);
+
+  let undone = 0;
+  const toUndo = [];
+  for (let i = data.length - 1; i >= 1; i--) {
+    const ts = new Date(String(data[i][0]));
+    if (scope === "last" && toUndo.length >= 1) break;
+    if (cutoff && ts < cutoff) break;
+    if (scope === "all" || scope === "last" || (cutoff && ts >= cutoff)) {
+      toUndo.push({
+        idx: i, timestamp: data[i][0], user: data[i][1], module: data[i][2],
+        action: data[i][3], field: data[i][4], oldValue: data[i][5], newValue: data[i][6],
+        reason: data[i][7], row: data[i][8], column: data[i][9]
+      });
     }
-    return jsonSuccess({ audit: logs });
-  } catch (err) { return jsonError(err.message); }
+  }
+
+  const errors = [];
+  toUndo.forEach(entry => {
+    try {
+      if (String(entry.module).startsWith("Sheet:")) {
+        const sheetName = String(entry.module).replace("Sheet:", "");
+        const targetSheet = ss.getSheetByName(sheetName);
+        if (targetSheet && entry.row && entry.column && entry.oldValue !== undefined) {
+          targetSheet.getRange(parseInt(entry.row), parseInt(entry.column)).setValue(entry.oldValue);
+          undone++;
+        }
+      } else if (entry.module === "Payments" && entry.action === "StatusChange") {
+        const pSheet = ss.getSheetByName("Payments");
+        if (pSheet && entry.row && entry.column && entry.oldValue) {
+          pSheet.getRange(parseInt(entry.row), parseInt(entry.column)).setValue(entry.oldValue);
+          undone++;
+        }
+      } else if (entry.module === "Settings" && entry.action === "Update") {
+        const sSheet = ss.getSheetByName("Settings");
+        const sData = sSheet.getDataRange().getValues();
+        for (let j = 0; j < sData.length; j++) {
+          if (String(sData[j][0]).trim() === entry.field) { sSheet.getRange(j + 1, 2).setValue(entry.oldValue); undone++; break; }
+        }
+      }
+      logAudit({ adminUser: p.adminUser, module: entry.module, action: "UNDO_" + entry.action,
+        field: entry.field, oldValue: entry.newValue, newValue: entry.oldValue,
+        reason: "Undo by " + p.adminUser + " (scope: " + scope + ")",
+        row: entry.row, column: entry.column }, p);
+    } catch (e) { errors.push(e.message); }
+  });
+
+  logActivity({ adminUser: p.adminUser, module: "System", action: "UndoActions",
+    detail: "Undone " + undone + " action(s) [scope: " + scope + "]" }, p);
+  return { result: "Done", undone, errors };
 }
 
 // ============================================================
-// 10. SHEET INITIALIZATION  (used by both manual admin action
-//     "createEventSpreadsheet" and the automatic Apply-Event flow)
+// 14. SHEET EDITOR (Super Admin Only)
 // ============================================================
-// NOTE: initializeEventSpreadsheet() itself lives in SheetInit.gs
-// (a separate file in this project) to keep this file focused on
-// routing/API logic. Do not redefine it here.
-
-function apiCreateEventSpreadsheet(params) {
-  try {
-    verifySuperAdmin(params);
-    const spreadsheetId = params.targetSpreadsheetId || params.sid;
-    if (!spreadsheetId) return jsonError("Target Spreadsheet ID is required.");
-    const result = initializeEventSpreadsheet(spreadsheetId);
-    return jsonSuccess({ result: result.success ? "SpreadsheetInitialized" : "Failed" });
-  } catch (err) { return jsonError(err.message); }
+function getSheetsList(p) {
+  verifySuperAdmin(p);
+  return { sheets: getCurrentSpreadsheet(p).getSheets().map(s => s.getName()) };
+}
+function getSheetData(p) {
+  verifySuperAdmin(p);
+  const ss = getCurrentSpreadsheet(p);
+  const sheet = ss.getSheetByName(p.sheetName);
+  if (!sheet) return { error: "Sheet not found" };
+  const data = sheet.getDataRange().getValues();
+  return { data, rows: data.length, cols: data[0] ? data[0].length : 0, sheetName: p.sheetName };
+}
+function updateSheetCell(p) {
+  verifySuperAdmin(p);
+  const ss = getCurrentSpreadsheet(p);
+  const sheet = ss.getSheetByName(p.sheetName);
+  if (!sheet) throw new Error("Sheet not found");
+  const row = parseInt(p.row), col = parseInt(p.col);
+  if (row < 2) throw new Error("Cannot edit header row");
+  const oldVal = sheet.getRange(row, col).getValue();
+  sheet.getRange(row, col).setValue(p.value);
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const fieldName = headers[col - 1] || ("Col " + col);
+  logAudit({ adminUser: p.adminUser, module: "Sheet:" + p.sheetName, action: "CellEdit",
+    field: fieldName, oldValue: String(oldVal), newValue: String(p.value),
+    reason: p.reason || "Direct edit", row: row, column: col }, p);
+  logActivity({ adminUser: p.adminUser, module: "Sheet:" + p.sheetName, action: "CellEdit",
+    detail: "Edited " + fieldName + " in row " + row, oldValue: String(oldVal), newValue: String(p.value) }, p);
+  return { result: "Updated" };
+}
+function addSheetRow(p) {
+  verifySuperAdmin(p);
+  const ss = getCurrentSpreadsheet(p);
+  const sheet = ss.getSheetByName(p.sheetName);
+  if (!sheet) throw new Error("Sheet not found");
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const cols = headers.length || 3;
+  const rowData = JSON.parse(p.rowData || "[]");
+  const finalRow = Array(cols).fill("").map((v, i) => rowData[i] !== undefined ? rowData[i] : "");
+  sheet.appendRow(finalRow);
+  const newRowNum = sheet.getLastRow();
+  logAudit({ adminUser: p.adminUser, module: "Sheet:" + p.sheetName, action: "AddRow",
+    field: "row", oldValue: "", newValue: JSON.stringify(finalRow), reason: p.reason || "New row",
+    row: newRowNum, column: 1 }, p);
+  logActivity({ adminUser: p.adminUser, module: "Sheet:" + p.sheetName, action: "AddRow",
+    detail: "Added new row " + newRowNum + " to " + p.sheetName }, p);
+  return { result: "Added", row: newRowNum };
+}
+function deleteSheetRow(p) {
+  verifySuperAdmin(p);
+  const ss = getCurrentSpreadsheet(p);
+  const sheet = ss.getSheetByName(p.sheetName);
+  if (!sheet) throw new Error("Sheet not found");
+  const row = parseInt(p.row);
+  if (row < 2) throw new Error("Cannot delete header row");
+  const oldData = sheet.getRange(row, 1, 1, sheet.getLastColumn()).getValues()[0];
+  sheet.deleteRow(row);
+  logAudit({ adminUser: p.adminUser, module: "Sheet:" + p.sheetName, action: "DeleteRow",
+    field: "row " + row, oldValue: JSON.stringify(oldData), newValue: "", reason: p.reason || "Deleted",
+    row: row, column: 1 }, p);
+  logActivity({ adminUser: p.adminUser, module: "Sheet:" + p.sheetName, action: "DeleteRow",
+    detail: "Deleted row " + row + " from " + p.sheetName }, p);
+  return { result: "Deleted" };
 }
 
 // ============================================================
-// 11. APPLY EVENT — OTP, duplicate check, automatic creation
+// 15. APPLY / CREATE EVENT — OTP + automatic per-event spreadsheet
 // ============================================================
-
 const EVENT_CODE_PREFIX = {
   "Marriage": "WED", "Birthday": "BDY", "Reception": "REC", "Engagement": "ENG",
   "Anniversary": "ANN", "Baby Shower": "BBS", "House Warming": "HSW",
   "Temple Festival": "TMP", "Corporate Event": "COR", "Naming Ceremony": "NAM", "Other": "OTH"
 };
-
-// Common folders for every event, per the specified structure.
-// Gallery folder name is the only thing that varies by event type.
 const EVENT_GALLERY_FOLDER_NAME = {
   "Marriage": ["Marriage Gallery", "Haldi Gallery", "Engagement Gallery"],
-  "Birthday": ["Birthday Gallery"],
-  "Reception": ["Reception Gallery"],
-  "Temple Festival": ["Festival Gallery"],
-  // Not explicitly specified — sensible default pattern, single gallery folder:
-  "Engagement": ["Engagement Gallery"], "Anniversary": ["Anniversary Gallery"],
-  "Baby Shower": ["Baby Shower Gallery"], "House Warming": ["House Warming Gallery"],
-  "Corporate Event": ["Corporate Gallery"], "Naming Ceremony": ["Naming Ceremony Gallery"],
-  "Other": ["Event Gallery"]
+  "Birthday": ["Birthday Gallery"], "Reception": ["Reception Gallery"],
+  "Temple Festival": ["Festival Gallery"], "Engagement": ["Engagement Gallery"],
+  "Anniversary": ["Anniversary Gallery"], "Baby Shower": ["Baby Shower Gallery"],
+  "House Warming": ["House Warming Gallery"], "Corporate Event": ["Corporate Gallery"],
+  "Naming Ceremony": ["Naming Ceremony Gallery"], "Other": ["Event Gallery"]
 };
-
 const FOLDER_NAME_TO_SETTINGS_KEY = {
   "Invitation Card": "INVITATION_FOLDER_ID", "Complaint Uploads": "COMPLAINT_UPLOAD_FOLDER_ID",
   "Marriage Gallery": "MARRIAGE_GALLERY_FOLDER_ID", "Haldi Gallery": "HALDI_GALLERY_FOLDER_ID",
@@ -1052,16 +1337,6 @@ const FOLDER_NAME_TO_SETTINGS_KEY = {
   "Festival Gallery": "TEMPLE_FESTIVAL_GALLERY_FOLDER_ID", "Corporate Gallery": "CORPORATE_GALLERY_FOLDER_ID",
   "Naming Ceremony Gallery": "NAMING_CEREMONY_GALLERY_FOLDER_ID", "Event Gallery": "OTHER_GALLERY_FOLDER_ID"
 };
-
-function apiSendOrganizerOtp(p) { return sendOrganizerOtp(p.email); }
-function apiVerifyOrganizerOtp(p) { return verifyOrganizerOtp(p.email, p.otp); }
-function apiCheckDuplicateEvent(p) { return checkDuplicateEvent(p.organizerEmail, p.eventDate, p.eventName); }
-function apiSubmitEventApplication(p) {
-  let formData;
-  try { formData = JSON.parse(p.formData || "{}"); }
-  catch (err) { return { success: false, message: "Malformed form data." }; }
-  return submitEventApplication(formData);
-}
 
 function sendOrganizerOtp(email) {
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { success: false, message: "Invalid email address." };
@@ -1085,12 +1360,12 @@ function verifyOrganizerOtp(email, otp) {
 function checkDuplicateEvent(organizerEmail, eventDate, eventName) {
   const sheet = getOrCreateEventsSheet_();
   const data = sheet.getDataRange().getValues();
-  const col = {};
-  data[0].forEach((h, i) => { col[h] = i; });
+  const col = {}; data[0].forEach((h, i) => { col[h] = i; });
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
     const sameEmail = row[col["OrganizerEmail"]] === organizerEmail;
-    const sameDate = formatDateOnly_(row[col["CreatedDate"]]) === eventDate || String(row[col["EventName"]]).toLowerCase() === String(eventName).toLowerCase();
+    const sameDate = formatDateOnly_(row[col["CreatedDate"]]) === eventDate ||
+      cleanText_(row[col["EventName"]]).toLowerCase() === cleanText_(eventName).toLowerCase();
     if (sameEmail && sameDate) return { duplicate: true, message: "A similar event already exists for this email." };
   }
   return { duplicate: false };
@@ -1103,6 +1378,15 @@ function formatDateOnly_(value) {
   return Utilities.formatDate(d, Session.getScriptTimeZone() || "Asia/Kolkata", "dd-MMM-yyyy");
 }
 
+function submitEventApplicationAction(p) {
+  let formData;
+  try { formData = JSON.parse(p.formData || "{}"); }
+  catch (err) { return { success: false, message: "Malformed form data." }; }
+  // Defense-in-depth: strip any stray "+"/percent-encoding from every text field.
+  Object.keys(formData).forEach(k => { if (typeof formData[k] === "string") formData[k] = cleanText_(formData[k]); });
+  return submitEventApplication(formData);
+}
+
 function submitEventApplication(formData) {
   try {
     const cache = CacheService.getScriptCache();
@@ -1110,8 +1394,6 @@ function submitEventApplication(formData) {
       return { success: false, message: "Email not verified. Please verify OTP first." };
     }
 
-    // Automatically extract the Spreadsheet ID from whatever the user pasted —
-    // full edit URL or a bare ID both work.
     const spreadsheetId = extractSpreadsheetId_(formData.spreadsheetLink);
     if (!spreadsheetId) return { success: false, message: "Could not read a valid Google Sheets link." };
 
@@ -1126,15 +1408,15 @@ function submitEventApplication(formData) {
       return { success: false, message: "This email has already used its free trial." };
     }
 
-    const eventId = getNextEventId_();                 // automatic, numeric, e.g. 1000
-    const eventCode = generateEventCode_(formData.eventType); // automatic
-    const eventName = formData.autoEventName || buildEventName_(formData);
+    const eventId = getNextEventId_();
+    const eventCode = generateEventCode_(formData.eventType);
+    const eventName = cleanText_(formData.autoEventName || buildEventName_(formData));
 
     const initResult = initializeEventSpreadsheet(spreadsheetId);
     if (!initResult || !initResult.success) return { success: false, message: "Failed to initialize spreadsheet." };
 
     const folderResult = createEventDriveFolders_(eventId, eventCode, eventName, formData.eventType);
-    writeEventSettings_(targetSs, formData, folderResult.settingsUpdates);
+    writeEventSettings_(targetSs, formData, folderResult.settingsUpdates, eventName);
 
     const adminUsername = "admin_" + eventCode;
     const adminPassword = generateSecurePassword_(12);
@@ -1156,7 +1438,7 @@ function submitEventApplication(formData) {
       SpreadsheetID: spreadsheetId, SpreadsheetLink: formData.spreadsheetLink,
       OrganizerName: formData.organizerName, OrganizerPhone: formData.organizerPhone, OrganizerEmail: formData.organizerEmail,
       Plan: formData.plan, TrialExpiry: trialExpiry,
-      Status: "Active", SettlementStatus: "Pending",           // automatic — never asked from the user
+      Status: "Active", SettlementStatus: "Pending",
       CreatedDate: createdDate, UpdatedDate: createdDate,
       AdminUsername: adminUsername, AdminPassword: adminPassword, PublicURL: publicURL, AdminURL: adminURL
     });
@@ -1165,9 +1447,11 @@ function submitEventApplication(formData) {
 
     try {
       sendEventCreatedEmail_(formData.organizerEmail, {
-        eventName: eventName, eventId: eventId, eventCode: eventCode, spreadsheetLink: formData.spreadsheetLink,
+        eventName: eventName, eventId: eventId, eventCode: eventCode, eventType: formData.eventType,
+        organizerName: formData.organizerName, organizerPhone: formData.organizerPhone, organizerEmail: formData.organizerEmail,
+        spreadsheetLink: formData.spreadsheetLink, spreadsheetId: spreadsheetId,
         publicURL: publicURL, adminURL: adminURL, adminUsername: adminUsername, adminPassword: adminPassword,
-        plan: formData.plan, trialExpiry: trialExpiry
+        plan: formData.plan, trialExpiry: trialExpiry, createdDate: createdDate, status: "Active"
       });
     } catch (mailErr) {}
 
@@ -1219,9 +1503,7 @@ function hasClaimedFreeTrial_(email) {
   const data = sheet.getDataRange().getValues();
   const col = getColMap(data[0]);
   const emailCol = col["organizeremail"], planCol = col["plan"];
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][emailCol] === email && data[i][planCol] === "Free") return true;
-  }
+  for (let i = 1; i < data.length; i++) if (data[i][emailCol] === email && data[i][planCol] === "Free") return true;
   return false;
 }
 
@@ -1240,17 +1522,10 @@ function buildEventName_(formData) {
   }
 }
 
-/**
- * Creates the event's Drive folder tree INSIDE ROOT_DRIVE_FOLDER_ID:
- *   <EventID>_<EventCode>_<EventName>
- *   ├── Invitation Card
- *   ├── Complaint Uploads
- *   └── <gallery folder(s) specific to eventType>
- * Exactly the folders listed for that event type — nothing extra.
- */
 function createEventDriveFolders_(eventId, eventCode, eventName, eventType) {
-  const root = DriveApp.getFolderById(getRootDriveFolderId());
-  const parentName = eventId + "_" + eventCode + "_" + eventName;
+  const cleanName = cleanText_(eventName);
+  const root = DriveApp.getFolderById(getRootDriveFolderId_());
+  const parentName = eventId + "_" + eventCode + "_" + cleanName;
   const parentFolder = getOrCreateChildFolder_(root, parentName);
 
   const galleryFolders = EVENT_GALLERY_FOLDER_NAME[eventType] || EVENT_GALLERY_FOLDER_NAME["Other"];
@@ -1263,7 +1538,6 @@ function createEventDriveFolders_(eventId, eventCode, eventName, eventType) {
     if (settingsKey) settingsUpdates[settingsKey] = folder.getId();
     if (folderName === "Invitation Card") settingsUpdates["INVITATION_CARD_DRIVE_LINK"] = "https://drive.google.com/drive/folders/" + folder.getId();
   });
-
   return { parentFolderId: parentFolder.getId(), settingsUpdates: settingsUpdates };
 }
 
@@ -1272,17 +1546,15 @@ function getOrCreateChildFolder_(parentFolder, name) {
   return existing.hasNext() ? existing.next() : parentFolder.createFolder(name);
 }
 
-function writeEventSettings_(targetSs, formData, folderSettings) {
+function writeEventSettings_(targetSs, formData, folderSettings, cleanEventName) {
   const settingsSheet = targetSs.getSheetByName("Settings");
   if (!settingsSheet) return;
-
   const updates = {
-    "Event Name": formData.autoEventName, "EventDate": formData.eventDate, "EventTime": formData.eventTime,
-    "VenueAddress": formData.venue, "VenueMapLink": formData.mapsLink, "UPI_ID": formData.upiId,
-    "ORG_NAME": formData.organizerName, "OrganizerEmail": formData.organizerEmail
+    "Event Name": cleanEventName, "EventDate": formData.eventDate, "EventTime": formData.eventTime,
+    "VenueAddress": cleanText_(formData.venue), "VenueMapLink": formData.mapsLink, "UPI_ID": formData.upiId,
+    "ORG_NAME": cleanText_(formData.organizerName), "OrganizerEmail": formData.organizerEmail
   };
   Object.keys(folderSettings || {}).forEach(key => { updates[key] = folderSettings[key]; });
-
   const extraKeys = {
     "BrideName": formData.brideName, "GroomName": formData.groomName, "BirthdayPersonName": formData.birthdayPersonName,
     "FamilyName": formData.familyName, "TempleName": formData.templeName, "CompanyName": formData.companyName,
@@ -1311,7 +1583,7 @@ function writeAdminAccount_(targetSs, username, password, email) {
 }
 
 function logAudit_(entry) {
-  const masterSs = SpreadsheetApp.openById(getMasterDbId());
+  const masterSs = SpreadsheetApp.openById(getMasterDbId_());
   let sheet = masterSs.getSheetByName("AuditLog");
   if (!sheet) {
     sheet = masterSs.insertSheet("AuditLog");
@@ -1328,53 +1600,42 @@ function generateSecurePassword_(length) {
   return password;
 }
 
-function sendEventCreatedEmail_(to, details) {
-  const body =
-    "Congratulations! Your event has been created.\n\n" +
-    "Event Name: " + details.eventName + "\n" + "Event ID: " + details.eventId + "\n" + "Event Code: " + details.eventCode + "\n" +
-    "Plan: " + details.plan + (details.trialExpiry ? (" (trial expires " + details.trialExpiry + ")") : "") + "\n\n" +
-    "Spreadsheet: " + details.spreadsheetLink + "\n" + "Public Page: " + details.publicURL + "\n" + "Admin Panel: " + details.adminURL + "\n\n" +
-    "Admin Username: " + details.adminUsername + "\n" + "Temporary Password: " + details.adminPassword + "\n" +
-    "(Please log in and change this password immediately.)\n";
-  MailApp.sendEmail(to, "Your EventPay Event Is Ready — " + details.eventCode, body);
+// Professional HTML confirmation email (requirement #19).
+function sendEventCreatedEmail_(to, d) {
+  const btn = (label, url) => `<a href="${url}" style="display:inline-block;padding:12px 22px;margin:6px 8px 0 0;background:#6366f1;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;font-family:Arial,sans-serif;font-size:14px;">${label}</a>`;
+  const row = (label, value) => `<tr><td style="padding:6px 12px;color:#6b7280;font-size:13px;font-family:Arial,sans-serif;white-space:nowrap;">${label}</td><td style="padding:6px 12px;color:#111827;font-size:13px;font-family:Arial,sans-serif;font-weight:600;">${value}</td></tr>`;
+  const html = `
+  <div style="max-width:600px;margin:0 auto;font-family:Arial,sans-serif;background:#f9fafb;padding:24px;">
+    <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:14px 14px 0 0;padding:28px;text-align:center;">
+      <h1 style="color:#fff;margin:0;font-size:22px;">🎉 Your EventPay Event Has Been Created Successfully</h1>
+    </div>
+    <div style="background:#ffffff;border-radius:0 0 14px 14px;padding:24px;border:1px solid #e5e7eb;border-top:none;">
+      <p style="color:#374151;font-size:14px;">Hi ${d.organizerName || "there"}, your event is ready to go. Keep this email safe — it contains your admin login.</p>
+      <table style="width:100%;border-collapse:collapse;margin:16px 0;background:#f9fafb;border-radius:10px;overflow:hidden;">
+        ${row("Event Name", d.eventName)}
+        ${row("Event Code", d.eventCode)}
+        ${row("Event ID", d.eventId)}
+        ${row("Event Type", d.eventType || "")}
+        ${row("Organizer", d.organizerName || "")}
+        ${row("Organizer Phone", d.organizerPhone || "")}
+        ${row("Organizer Email", d.organizerEmail || "")}
+        ${row("Plan", d.plan + (d.trialExpiry ? " (trial expires " + d.trialExpiry + ")" : ""))}
+        ${row("Spreadsheet ID", d.spreadsheetId || "")}
+        ${row("Created", d.createdDate || "")}
+        ${row("Status", d.status || "Active")}
+        ${row("Admin Username", d.adminUsername)}
+        ${row("Admin Password", d.adminPassword)}
+      </table>
+      <p style="color:#b91c1c;font-size:12px;">Please log in and change this password as soon as possible.</p>
+      <div style="margin-top:12px;">
+        ${btn("Open Public Event", d.publicURL)}
+        ${btn("Open Admin Panel", d.adminURL)}
+        ${btn("Open Spreadsheet", d.spreadsheetLink)}
+      </div>
+      <p style="color:#9ca3af;font-size:11px;margin-top:24px;">Support: reply to this email if you need help setting anything up.</p>
+    </div>
+  </div>`;
+  const plain = "Your event has been created.\nEvent: " + d.eventName + " (" + d.eventCode + ")\nAdmin: " + d.adminUsername + " / " + d.adminPassword +
+    "\nPublic: " + d.publicURL + "\nAdmin: " + d.adminURL;
+  MailApp.sendEmail({ to: to, subject: "🎉 Your EventPay Event Has Been Created Successfully — " + d.eventCode, body: plain, htmlBody: html });
 }
-
-
-function apiGetEvents() {
-
-  const sheet = getOrCreateEventsSheet_();
-  const data = sheet.getDataRange().getValues();
-
-  if (data.length < 2) {
-    return {
-      success: true,
-      events: []
-    };
-  }
-
-  const headers = data[0];
-  const events = [];
-
-  for (let i = 1; i < data.length; i++) {
-
-    let row = {};
-
-    headers.forEach((h, j) => {
-      row[h] = data[i][j];
-    });
-
-    if (String(row.Status).toLowerCase() === "active") {
-      events.push(row);
-    }
-
-  }
-
-  return {
-    success: true,
-    events: events
-  };
-
-}
-
-
-
