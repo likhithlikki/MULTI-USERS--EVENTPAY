@@ -399,7 +399,7 @@ async function selectEvent(e, evEncoded) {
   }
 
   sessionStorage.setItem("ep_loading", "true");
-  sessionStorage.removeItem("ep_loading");
+ 
   window.location.href = "home.html";
   
 }
@@ -417,7 +417,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     await resetEventPayCache();
 
     await loadEvents();
-
+  
 });
 
   
