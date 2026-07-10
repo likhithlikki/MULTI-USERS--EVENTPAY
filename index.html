@@ -174,6 +174,18 @@
 </footer>
 <div class="toast-container" id="toastContainer"></div>
 
+<!-- EVENT LOADING OVERLAY — shown while selectEventAndLoad() preloads
+     Settings/Gallery/Villages for the chosen event before navigating to
+     home.html. Nothing else on the page is clickable while this is up. -->
+<div id="eventLoadOverlay" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(11,15,26,0.92);backdrop-filter:blur(4px);align-items:center;justify-content:center;flex-direction:column;gap:18px;">
+  <div style="width:44px;height:44px;border:3px solid rgba(99,102,241,0.25);border-top-color:var(--accent);border-radius:50%;animation:eventLoadSpin .8s linear infinite;"></div>
+  <div id="eventLoadLabel" style="color:#fff;font-family:'Sora',sans-serif;font-size:14px;font-weight:600;">Selecting event...</div>
+  <div style="width:220px;height:4px;border-radius:4px;background:rgba(255,255,255,0.12);overflow:hidden;">
+    <div id="eventLoadBar" style="height:100%;width:10%;border-radius:4px;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .3s ease;"></div>
+  </div>
+</div>
+<style>@keyframes eventLoadSpin{to{transform:rotate(360deg)}}</style>
+
 <script src="config.js"></script>
 <script>
 // ============================================================
@@ -285,7 +297,11 @@ function setFilter(type, btn) {
   filterEvents(document.getElementById("searchBox").value);
 }
 
-function selectEvent(e, evEncoded) {
+const EVENT_LOAD_STEPS = [
+  "Selecting event...", "Loading settings...", "Loading gallery...", "Loading villages...", "Done"
+];
+
+async function selectEvent(e, evEncoded) {
   e.stopPropagation();
   const ev = JSON.parse(decodeURIComponent(evEncoded));
 
@@ -293,27 +309,39 @@ function selectEvent(e, evEncoded) {
     toast("This event is currently inactive.", "warning"); return;
   }
 
-  // Build event API URL from SpreadsheetID
-  // Each event has its own Apps Script OR we pass SpreadsheetID to the master script
-  // Approach: Use SpreadsheetID as param to master script (single backend, multi-sheet)
-  const eventApiUrl = MASTER_API + "&spreadsheetId=" + encodeURIComponent(ev.SpreadsheetID || "");
-
-  // Better approach: each event has a ScriptURL field OR we construct from master
-  const scriptUrl = ev.ScriptURL || ev.ApiUrl || (MASTER_API + "&sid=" + encodeURIComponent(ev.SpreadsheetID || ""));
-
+  const eid = ev.EventID || ev.EventCode;
+  const sid = ev.SpreadsheetID || "";
   const ename = ev.EventName || "Event";
-setSelectedEvent(
-    ev.EventID || ev.EventCode,
-    ev.SpreadsheetID,
-    ename
-);
 
-  // Store full event info for home page
+  if (!sid) {
+    toast("This event is missing its Spreadsheet ID — cannot open it.", "error");
+    return;
+  }
+
+  // Store full event info for home page (unrelated to the sid/settings
+  // cache — this is just the registry row for display purposes).
   sessionStorage.setItem("ep_event_obj", JSON.stringify(ev));
   localStorage.setItem("ep_event_obj", JSON.stringify(ev));
 
-  toast("Opening " + ename + "...", "success", 1500);
-  setTimeout(() => window.location.href = "home.html", 600);
+  const overlay = document.getElementById("eventLoadOverlay");
+  const label = document.getElementById("eventLoadLabel");
+  const bar = document.getElementById("eventLoadBar");
+  overlay.style.display = "flex";
+
+  try {
+    await selectEventAndLoad(eid, sid, ename, (stepLabel) => {
+      label.textContent = stepLabel;
+      const idx = EVENT_LOAD_STEPS.indexOf(stepLabel);
+      const pct = idx >= 0 ? Math.round(((idx + 1) / EVENT_LOAD_STEPS.length) * 100) : 100;
+      bar.style.width = pct + "%";
+    });
+  } catch (err) {
+    // Preload is best-effort by design (see selectEventAndLoad) — even
+    // on an unexpected error here, the event is already selected, so
+    // proceed to home.html rather than stranding the user on this page.
+  }
+
+  window.location.href = "home.html";
 }
 
 loadEvents();
