@@ -6,15 +6,22 @@
 // ============================================================
 
 const APP_CONFIG = {
-  SCRIPT_URL: "https://script.google.com/macros/s/AKfycbwifgugRYlVPzbJ7w1Cq-euKA136llg98jJI4Y_QB9LslbcOaNPsggxb7BvcUZuArkf/exec",
+  SCRIPT_URL: "https://script.google.com/macros/s/AKfycbziup2hPqlG3tvQZPnkoaTGxl58f5T5811W6SrppaCFrO_dFJGYHbFZ_Qc3OvEtdEvI/exec",
 
   APP_NAME: "EventPay",
   APP_VER: "4.0",
   CURRENCY: "INR",
 
+  // Bump this any time stored event/session data could be stale relative to
+  // a new deployment or schema change (new Master DB, new sid format, etc).
+  // On load, if the version stamped in storage doesn't match this, all
+  // ep_* keys are wiped automatically — see STORAGE VERSIONING below.
+  STORAGE_VERSION: "2026-07-10.1",
+
   // LocalStorage keys
   LS: {
     THEME:          "ep_theme",
+    STORAGE_VER:    "ep_storage_version",
     SELECTED_EID:   "ep_selected_eid",    // selected event ID
     SELECTED_EURL:  "ep_selected_eurl",   // NOTE: name kept for backward-compat with older
                                            // pages, but this now stores the event's
@@ -28,6 +35,48 @@ const APP_CONFIG = {
 
   QUICK_AMTS: [101, 251, 501, 1001, 2001, 5001],
 };
+
+// ============================================================
+// STORAGE VERSIONING (THE STALE-SID FIX)
+// ------------------------------------------------------------
+// Root cause found: the browser was caching a selected event's "sid" in
+// localStorage/sessionStorage indefinitely. After any backend redeploy,
+// Master DB change, or simply switching test events, that cached sid kept
+// being sent on every request — which is exactly what produced "wrong
+// spreadsheet", "You do not have permission...", and even downstream
+// 400/CORS-looking failures, despite the backend itself working correctly.
+//
+// Fix, runs BEFORE anything else in this file touches storage:
+//   1. Compare the version stamped in storage to APP_CONFIG.STORAGE_VERSION.
+//   2. If it doesn't match (or is missing — e.g. very first load, or an
+//      old browser that predates this mechanism), wipe every "ep_*" key
+//      from both localStorage and sessionStorage, then stamp the current
+//      version. This guarantees no session survives across a version bump.
+//   3. Bump APP_CONFIG.STORAGE_VERSION above whenever you deploy a change
+//      that could make previously-selected event data stale (new Master
+//      DB, changed sid resolution logic, schema change, etc.) — every
+//      returning visitor's stale selection is discarded automatically,
+//      with zero manual "clear your cache" instructions needed.
+// This does NOT run on every page load forever — only when the stamped
+// version differs, so normal sessions are untouched.
+// ============================================================
+(function () {
+  try {
+    const stamped = localStorage.getItem(APP_CONFIG.LS.STORAGE_VER);
+    if (stamped !== APP_CONFIG.STORAGE_VERSION) {
+      Object.keys(localStorage)
+        .filter(k => k.indexOf("ep_") === 0)
+        .forEach(k => localStorage.removeItem(k));
+      Object.keys(sessionStorage)
+        .filter(k => k.indexOf("ep_") === 0)
+        .forEach(k => sessionStorage.removeItem(k));
+      localStorage.setItem(APP_CONFIG.LS.STORAGE_VER, APP_CONFIG.STORAGE_VERSION);
+    }
+  } catch (e) {
+    // Storage may be unavailable (private browsing edge cases) — never
+    // block page load over this.
+  }
+})();
 
 // Backward-compat alias only — NOT a second config object. `EP` and
 // `APP_CONFIG` point at the exact same object in memory. This exists
@@ -89,12 +138,65 @@ function getEventSID() {
 }
 
 function setSelectedEvent(eid, sid, ename) {
+  // Always re-stamp the current storage version on every write, too —
+  // belt-and-braces in case a page calls this before the version-check
+  // IIFE above has run for some reason (e.g. script load order changes).
+  localStorage.setItem(APP_CONFIG.LS.STORAGE_VER, APP_CONFIG.STORAGE_VERSION);
   sessionStorage.setItem(APP_CONFIG.LS.SELECTED_EID, eid);
   sessionStorage.setItem(APP_CONFIG.LS.SELECTED_EURL, sid);
   sessionStorage.setItem(APP_CONFIG.LS.SELECTED_ENAME, ename);
   localStorage.setItem(APP_CONFIG.LS.SELECTED_EID, eid);
   localStorage.setItem(APP_CONFIG.LS.SELECTED_EURL, sid);
   localStorage.setItem(APP_CONFIG.LS.SELECTED_ENAME, ename);
+}
+
+// Clears just the selected-event fields (not theme/admin session), used
+// when a stored event turns out to be invalid/inactive so the user falls
+// back to picking one again instead of silently reusing bad data.
+function clearSelectedEvent() {
+  [APP_CONFIG.LS.SELECTED_EID, APP_CONFIG.LS.SELECTED_EURL, APP_CONFIG.LS.SELECTED_ENAME].forEach(k => {
+    sessionStorage.removeItem(k);
+    localStorage.removeItem(k);
+  });
+}
+
+// ============================================================
+// LIVE VALIDATION OF THE STORED EVENT
+// ------------------------------------------------------------
+// The version-wipe above handles staleness across deployments, but a
+// stored sid can also go bad WITHOUT a deployment — e.g. the event was
+// deactivated, deleted from the registry, or simply belongs to a
+// different test session than what's now in the Master DB. This checks
+// the currently stored sid against the live "getEvents" registry and
+// clears it if it's no longer a valid, active event.
+//
+// Cheap to call: results are cached for this page load (sessionStorage
+// flag) so it only hits the network once per tab per event selection,
+// not on every single api() call.
+// ============================================================
+async function validateSelectedEvent() {
+  const sid = getEventSID();
+  if (!sid) return true; // nothing selected — nothing to validate
+
+  const cacheKey = "ep_sid_validated_" + sid;
+  if (sessionStorage.getItem(cacheKey) === "1") return true;
+
+  try {
+    const res = await api("getEvents", {}, "GET");
+    const events = (res && res.events) || [];
+    const stillValid = events.some(ev => String(ev.SpreadsheetID || "").trim() === sid);
+    if (!stillValid) {
+      clearSelectedEvent();
+      return false;
+    }
+    sessionStorage.setItem(cacheKey, "1");
+    return true;
+  } catch (e) {
+    // Network/validation failure shouldn't itself wipe a possibly-good
+    // session — fail open and let the actual page request surface any
+    // real error instead.
+    return true;
+  }
 }
 
 // ============================================================
@@ -222,6 +324,18 @@ function requireEvent() {
     window.location.href = "index.html";
     return false;
   }
+  // Fire-and-forget live check: confirms the stored sid is still an
+  // active event in the registry. Kept non-blocking (doesn't await) so
+  // this stays a drop-in replacement for every page that already calls
+  // requireEvent() synchronously — but if the stored event turns out to
+  // be stale/deleted/deactivated, the user gets bounced back to pick a
+  // real one instead of the page silently working against dead data.
+  validateSelectedEvent().then(stillValid => {
+    if (!stillValid) {
+      toast("That event is no longer available — please pick again.", "warning");
+      setTimeout(() => { window.location.href = "index.html"; }, 1200);
+    }
+  });
   return true;
 }
 
