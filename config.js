@@ -462,3 +462,34 @@ function requireEvent() {
 }
 
 document.addEventListener("DOMContentLoaded", initTheme);
+
+
+
+const EVENT_CACHE_KEY = "ep_event_cache";
+
+function getCachedEventData() {
+    try {
+        const data = JSON.parse(sessionStorage.getItem(EVENT_CACHE_KEY) || "{}");
+
+        if (!data.time) return null;
+
+        if (Date.now() - data.time > 10 * 60 * 1000) {
+            sessionStorage.removeItem(EVENT_CACHE_KEY);
+            return null;
+        }
+
+        return data;
+    } catch(e){
+        return null;
+    }
+}
+
+function saveCachedEventData(data){
+    sessionStorage.setItem(EVENT_CACHE_KEY, JSON.stringify({
+        time: Date.now(),
+        ...data
+    }));
+}
+
+
+
