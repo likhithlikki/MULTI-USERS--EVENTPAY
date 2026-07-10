@@ -162,6 +162,9 @@
   <div class="no-events" id="noEvents" style="display:none">
     <div class="icon">🔍</div>
     <h3>No events found</h3>
+    <button id="refreshEventsBtn">
+    🔄 Refresh Events
+</button>
     <p>Try a different search term or filter.</p>
     <div style="margin-top:18px">
       <a href="apply-event.html" class="hero-cta-btn primary" style="display:inline-flex">➕ Apply for Event</a>
@@ -188,6 +191,32 @@
 
 <script src="config.js"></script>
 <script>
+
+  async function resetEventPayCache() {
+    console.log("🧹 Clearing previous EventPay cache...");
+
+    // Clear browser storage
+    localStorage.clear();
+    sessionStorage.clear();
+
+    // Clear Cache Storage
+    if ("caches" in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+        console.log("✅ Cache Storage cleared");
+    }
+
+    // Unregister all Service Workers
+    if ("serviceWorker" in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(r => r.unregister()));
+        console.log("✅ Service Workers removed");
+    }
+
+    console.log("✅ Startup cleanup completed");
+}
+
+  
 // ============================================================
 // MASTER DB CONFIG
 // Replace with your MASTER_DB Apps Script deployed URL
@@ -343,6 +372,14 @@ async function selectEvent(e, evEncoded) {
 
   window.location.href = "home.html";
 }
+  document.getElementById("refreshEventsBtn").onclick = async () => {
+
+    await resetEventPayCache();
+
+    location.reload();
+
+};
+  
 
 loadEvents();
 </script>
