@@ -149,7 +149,7 @@
 <nav class="navbar">
   <div class="nav-logo" id="navEventName">EventPay</div>
   <div class="nav-links">
-    <a href="index.html" class="nav-link">Home</a>
+    <a href="home.html" class="nav-link">Home</a>
     <a href="status.html" class="nav-link active">Status</a>
     <a href="complaint.html" class="nav-link">Complaint</a>
     <a href="admin-login.html" class="nav-link admin-link">Admin</a>
@@ -161,7 +161,7 @@
   </div>
 </nav>
 <div class="nav-mobile" id="navMobile">
-  <a href="index.html">🏠 Home</a>
+  <a href="home.html">🏠 Home</a>
   <a href="status.html">🔍 Check Status</a>
   <a href="complaint.html">📋 Complaint</a>
   <a href="admin-login.html">🔐 Admin</a>
@@ -210,10 +210,11 @@
 
 <script src="config.js"></script>
 <script>
+if (!requireEvent()) { /* redirected — no event selected */ }
 let currentType = 'refid';
 
-fetch(APP_CONFIG.SCRIPT_URL+"?action=getSettings").then(r=>r.json()).then(d=>{
-  const n=d.EventName||APP_CONFIG.EVENT_NAME||'EventPay';
+getEventSettingsCached().then(d=>{
+  const n=d.EventName||'EventPay';
   document.getElementById("navEventName").textContent=n;
   document.getElementById("eventSubtitle").textContent="Verify your contribution for "+n;
   document.title="Check Status — "+n;
