@@ -347,7 +347,7 @@ console.log("Selected Event");
 console.log(CURRENT_EVENT);
 
 
-const EVENT_API = APP_CONFIG.SCRIPT_URL;
+const EVENT_API = getEventScriptUrl();
 let eventObj  = {};
 try {
   eventObj = JSON.parse(sessionStorage.getItem("ep_event_obj") || localStorage.getItem("ep_event_obj") || "{}");
