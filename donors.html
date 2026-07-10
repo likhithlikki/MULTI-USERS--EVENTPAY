@@ -75,7 +75,7 @@
 <nav class="navbar">
   <div class="nav-logo" id="navEventName">EventPay</div>
   <div class="nav-links">
-    <a href="index.html" class="nav-link">Home</a>
+    <a href="home.html" class="nav-link">Home</a>
     <a href="donors.html" class="nav-link active">Donors</a>
     <a href="status.html" class="nav-link">Status</a>
     <a href="complaint.html" class="nav-link">Complaint</a>
@@ -84,7 +84,7 @@
   <button class="hamburger" onclick="toggleNav()">☰</button>
 </nav>
 <div class="nav-mobile" id="navMobile">
-  <a href="index.html">🏠 Home</a>
+  <a href="home.html">🏠 Home</a>
   <a href="donors.html">👥 Donors</a>
   <a href="status.html">🔍 Status</a>
   <a href="invite.html">💌 Invitation</a>
@@ -98,7 +98,7 @@
     <div class="icon">🔒</div>
     <h2>Not Available</h2>
     <p>The donor list is currently not available.<br>Please check back later.</p>
-    <a href="index.html" class="btn-primary" style="display:inline-flex;text-decoration:none;margin-top:24px">← Back to Home</a>
+    <a href="home.html" class="btn-primary" style="display:inline-flex;text-decoration:none;margin-top:24px">← Back to Home</a>
   </div>
 </div>
 
@@ -137,11 +137,12 @@
 
 <script src="config.js"></script>
 <script>
+if (!requireEvent()) { /* redirected — no event selected */ }
 let allDonors = [];
 
 // Load settings + visibility + donors in parallel
 Promise.all([
-  fetch(APP_CONFIG.SCRIPT_URL+"?action=getSettings").then(r=>r.json()).catch(()=>({})),
+  getEventSettingsCached().catch(()=>({})),
   fetch(APP_CONFIG.SCRIPT_URL+"?action=getPublicVisibility").then(r=>r.json()).catch(()=>({})),
   fetch(APP_CONFIG.SCRIPT_URL+"?action=getPublicPayments").then(r=>r.json()).catch(()=>({donors:[]}))
 ]).then(([settings, vis, data])=>{
