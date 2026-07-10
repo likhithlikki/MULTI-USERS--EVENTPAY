@@ -326,8 +326,7 @@
 // Reads event from sessionStorage/localStorage set by index.html
 // ============================================================
 
-console.log("Selected Event");
-console.log(CURRENT_EVENT);
+
   
   
 if (!requireEvent()) return;
@@ -337,8 +336,10 @@ const CURRENT_EVENT = {
     sid: getEventSID(),
     name: sessionStorage.getItem(APP_CONFIG.LS.SELECTED_ENAME)
 };
-
+  
+console.log("Selected Event");
 console.log(CURRENT_EVENT);
+
 
 const EVENT_API = APP_CONFIG.SCRIPT_URL;
 let eventObj  = {};
@@ -378,13 +379,38 @@ if (eventObj.EventName) {
 // Load full settings from event API — getSettings comes from the event
 // cache (populated during event selection on index.html, valid for 10
 // minutes) instead of always hitting the backend fresh.
+const cache = getCachedEventData();
+
+if (cache) {
+    villages = cache.villages || [];
+    console.log("✅ Loaded Home from cache");
+} else {
+    console.log("🌐 Loading Home from server");
+}
+
 Promise.all([
-  getEventSettingsCached().catch(()=>({})),
-  api(EVENT_API, "getPublicVisibility").catch(()=>({})),
-  api(EVENT_API, "getPublicStats").catch(()=>({total:0,count:0})),
-  api(EVENT_API, "getVillageSuggestions").catch(()=>({villages:[]})),
-  api(EVENT_API, "getRecentTransactions").catch(()=>({transactions:[]}))
+    getEventSettingsCached().catch(() => ({})),
+    cache
+        ? Promise.resolve(cache.visibility)
+        : api(EVENT_API, "getPublicVisibility").catch(() => ({})),
+    cache
+        ? Promise.resolve(cache.stats)
+        : api(EVENT_API, "getPublicStats").catch(() => ({ total:0, count:0 })),
+    cache
+        ? Promise.resolve({ villages: cache.villages })
+        : api(EVENT_API, "getVillageSuggestions").catch(() => ({ villages:[] })),
+    cache
+        ? Promise.resolve({ transactions: cache.transactions })
+        : api(EVENT_API, "getRecentTransactions").catch(() => ({ transactions:[] }))
 ]).then(([settings, vis, stats, vsug, rtx]) => {
+
+  saveCachedEventData({
+    visibility: vis,
+    stats: stats,
+    villages: vsug.villages || [],
+    transactions: rtx.transactions || []
+});
+
   upiID     = settings.UPI_ID || eventObj.UpiID || "";
   eventName = settings.EventName || eventObj.EventName || "Event";
   orgName   = settings.OrganizerName || settings.ORG_NAME || eventObj.OrganizerName || "Organisation";
