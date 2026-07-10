@@ -104,7 +104,7 @@
 <body>
 
 <!-- BACK TO HOME BUTTON -->
-<a href="index.html" class="login-back">← Back to Home</a>
+<a href="home.html" class="login-back">← Back to Home</a>
 
 <!-- THEME TOGGLE -->
 <div class="theme-top">
@@ -147,7 +147,7 @@
 
     <div class="login-footer">
       <p>Authorised personnel only</p>
-      <p style="margin-top:6px"><a href="index.html" class="text-link" style="font-size:12px">← Return to Event Page</a></p>
+      <p style="margin-top:6px"><a href="home.html" class="text-link" style="font-size:12px">← Return to Event Page</a></p>
     </div>
   </div>
 </div>
@@ -156,9 +156,13 @@
 
 <script src="config.js"></script>
 <script>
-// Load event name
-fetch(APP_CONFIG.SCRIPT_URL+"?action=getSettings").then(r=>r.json()).then(d=>{
-  const n=d.EventName||APP_CONFIG.EVENT_NAME||"EventPay";
+// Admin login must always be scoped to a specific event's Spreadsheet —
+// without a selected event there's no Admins sheet to validate against.
+if (!requireEvent()) { /* redirected — no event selected */ }
+
+// Load event name (from the cached event Settings — no Master DB call)
+getEventSettingsCached().then(d=>{
+  const n=d.EventName||"EventPay";
   document.getElementById("loginSubtitle").textContent=n;
   document.title="Admin Login — "+n;
 }).catch(()=>{});
