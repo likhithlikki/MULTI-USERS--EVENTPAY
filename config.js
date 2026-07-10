@@ -6,7 +6,7 @@
 // ============================================================
 
 const APP_CONFIG = {
-  SCRIPT_URL: "https://script.google.com/macros/s/AKfycbziup2hPqlG3tvQZPnkoaTGxl58f5T5811W6SrppaCFrO_dFJGYHbFZ_Qc3OvEtdEvI/exec",
+  SCRIPT_URL: "https://script.google.com/macros/s/AKfycbwifgugRYlVPzbJ7w1Cq-euKA136llg98jJI4Y_QB9LslbcOaNPsggxb7BvcUZuArkf/exec",
 
   APP_NAME: "EventPay",
   APP_VER: "4.0",
