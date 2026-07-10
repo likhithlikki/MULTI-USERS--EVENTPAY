@@ -381,7 +381,15 @@ async function selectEvent(e, evEncoded) {
 };
   
 
-loadEvents();
+document.addEventListener("DOMContentLoaded", async () => {
+
+    await resetEventPayCache();
+
+    await loadEvents();
+
+});
+
+  
 </script>
 </body>
 </html>
