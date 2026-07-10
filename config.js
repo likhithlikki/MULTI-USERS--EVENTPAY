@@ -285,6 +285,14 @@ async function selectEventAndLoad(eid, sid, ename, onStep) {
   clearSelectedEvent();       // drop any previous sid/eid/ename
   setSelectedEvent(eid, sid, ename);
 
+  // This event was just confirmed live against the Master Database (it
+  // came from the getEvents()/searchEvent() list rendered on this very
+  // page). Mark it pre-validated so the destination page's requireEvent()
+  // does NOT immediately re-query the Master Database again — that
+  // redundant re-check right after selection was the root cause of the
+  // false "event no longer available" toast.
+  try { sessionStorage.setItem("ep_sid_validated_" + sid, "1"); } catch (e) {}
+
   step("Loading settings...");
   let settings = {};
   try { settings = await api("getSettings", {}); } catch (e) {}
@@ -428,18 +436,28 @@ function requireEvent() {
     window.location.href = "index.html";
     return false;
   }
-  // Fire-and-forget live check: confirms the stored sid is still an
-  // active event in the registry. Kept non-blocking (doesn't await) so
-  // this stays a drop-in replacement for every page that already calls
-  // requireEvent() synchronously — but if the stored event turns out to
-  // be stale/deleted/deactivated, the user gets bounced back to pick a
-  // real one instead of the page silently working against dead data.
-  validateSelectedEvent().then(stillValid => {
-    if (!stillValid) {
-      toast("That event is no longer available — please pick again.", "warning");
-      setTimeout(() => { window.location.href = "index.html"; }, 1200);
-    }
-  });
+
+  // Master DB revalidation ONLY happens here if the local event cache has
+  // actually expired (10 min TTL) or was never populated for this sid.
+  // A warm cache means this event was already confirmed valid recently
+  // (either at selection time, or by a previous expired-cache refresh),
+  // so we trust it completely and never touch the Master DB — this is
+  // what stops the false "event no longer available" toast that used to
+  // fire on every page load right after a successful selection.
+  const cached = getEventCache();
+  if (!cached) {
+    validateSelectedEvent().then(stillValid => {
+      if (!stillValid) {
+        toast("That event is no longer available — please pick again.", "warning");
+        setTimeout(() => { window.location.href = "index.html"; }, 1200);
+      } else {
+        // Confirmed still active — refresh the cache now so subsequent
+        // pages in this tab don't need another Master DB round-trip
+        // until this new cache window itself expires.
+        getEventSettingsCached(true).catch(() => {});
+      }
+    });
+  }
   return true;
 }
 
