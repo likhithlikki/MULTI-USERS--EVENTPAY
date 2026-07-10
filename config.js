@@ -200,6 +200,110 @@ async function validateSelectedEvent() {
 }
 
 // ============================================================
+// EVENT CACHE — load once, reuse everywhere, expire automatically
+// ------------------------------------------------------------
+// Instead of every page independently calling api("getSettings", {sid})
+// on load, this loads the selected event's Settings once, stores it in
+// localStorage keyed to that sid, and every page reuses it until it
+// expires (10 minutes) or a different event is selected. This cuts
+// redundant Apps Script calls and guarantees every page is reading the
+// exact same settings snapshot for the current event.
+//
+// Cache shape (localStorage key: ep_event_cache):
+//   { sid, eventName, settings, loadedTime }
+//
+// Master DB is NOT involved here — this reads directly from the
+// selected event's own spreadsheet via the existing getSettings action
+// (which already resolves via sid, never the Master DB).
+// ============================================================
+const EVENT_CACHE_KEY = "ep_event_cache";
+const EVENT_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+function getEventCache() {
+  try {
+    const raw = localStorage.getItem(EVENT_CACHE_KEY);
+    if (!raw) return null;
+    const cache = JSON.parse(raw);
+    const sid = getEventSID();
+    if (!cache || cache.sid !== sid) return null;              // different event selected — stale
+    if (Date.now() - cache.loadedTime > EVENT_CACHE_TTL_MS) return null; // expired
+    return cache;
+  } catch (e) {
+    return null;
+  }
+}
+
+function setEventCache(sid, eventName, settings) {
+  try {
+    localStorage.setItem(EVENT_CACHE_KEY, JSON.stringify({
+      sid: sid, eventName: eventName, settings: settings, loadedTime: Date.now()
+    }));
+  } catch (e) { /* storage full/unavailable — cache is a pure optimization, safe to skip */ }
+}
+
+function clearEventCache() {
+  try { localStorage.removeItem(EVENT_CACHE_KEY); } catch (e) {}
+}
+
+// Drop-in replacement for `api("getSettings", {})` — same return shape
+// (the flat Settings object), but serves from cache when valid instead
+// of hitting the backend every time. Pages can swap:
+//   const settings = await api("getSettings", {});
+// for:
+//   const settings = await getEventSettingsCached();
+// with no other changes needed.
+async function getEventSettingsCached(forceRefresh) {
+  if (!forceRefresh) {
+    const cached = getEventCache();
+    if (cached) return cached.settings;
+  }
+  const settings = await api("getSettings", {});
+  setEventCache(getEventSID(), getSelectedEventName(), settings);
+  return settings;
+}
+
+function getSelectedEventName() {
+  return sessionStorage.getItem(APP_CONFIG.LS.SELECTED_ENAME) ||
+         localStorage.getItem(APP_CONFIG.LS.SELECTED_ENAME) || "";
+}
+
+// ============================================================
+// EVENT SELECTION + FULL PRELOAD (used by index.html's event cards)
+// ------------------------------------------------------------
+// Runs the full "select event → load everything → then navigate" flow
+// described in the loading-experience spec: clears any previous event's
+// cache/sid, stamps the new one, pulls Settings (+ villages + gallery so
+// they're warm for home.html/gallery.html), caches it, and only THEN
+// redirects to home.html. Reports progress via onStep(label) so the
+// caller can drive a progress UI.
+// ============================================================
+async function selectEventAndLoad(eid, sid, ename, onStep) {
+  const step = (label) => { try { onStep && onStep(label); } catch (e) {} };
+
+  step("Selecting event...");
+  clearEventCache();          // drop any previous event's cached settings
+  clearSelectedEvent();       // drop any previous sid/eid/ename
+  setSelectedEvent(eid, sid, ename);
+
+  step("Loading settings...");
+  let settings = {};
+  try { settings = await api("getSettings", {}); } catch (e) {}
+  setEventCache(sid, ename, settings);
+
+  // Best-effort warm-up of secondary data. These are cheap GETs and are
+  // allowed to fail silently — home.html/gallery.html will simply fetch
+  // them fresh (uncached) if this pre-warm didn't succeed for any reason.
+  step("Loading gallery...");
+  try { await api("getGalleryImages", {}); } catch (e) {}
+
+  step("Loading villages...");
+  try { await api("getVillageSuggestions", {}); } catch (e) {}
+
+  step("Done");
+  return settings;
+}
+
+// ============================================================
 // AUTO-SID INJECTION (THE MULTI-EVENT FIX)
 // ------------------------------------------------------------
 // Root cause of "every page loads the default/Ram&Sita spreadsheet":
