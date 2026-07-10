@@ -350,7 +350,6 @@ async function selectEvent(e, evEncoded) {
   // Store full event info for home page (unrelated to the sid/settings
   // cache — this is just the registry row for display purposes).
   sessionStorage.setItem("ep_event_obj", JSON.stringify(ev));
-  localStorage.setItem("ep_event_obj", JSON.stringify(ev));
 
   const overlay = document.getElementById("eventLoadOverlay");
   const label = document.getElementById("eventLoadLabel");
