@@ -325,9 +325,22 @@
 // HOME.HTML — Per-event contribution page
 // Reads event from sessionStorage/localStorage set by index.html
 // ============================================================
-if (!requireEvent()) { /* redirected */ }
 
-let EVENT_API = getEventAPI();
+console.log("Selected Event");
+console.log(CURRENT_EVENT);
+  
+  
+if (!requireEvent()) return;
+
+const CURRENT_EVENT = {
+    eid: sessionStorage.getItem(APP_CONFIG.LS.SELECTED_EID),
+    sid: getEventSID(),
+    name: sessionStorage.getItem(APP_CONFIG.LS.SELECTED_ENAME)
+};
+
+console.log(CURRENT_EVENT);
+
+const EVENT_API = APP_CONFIG.SCRIPT_URL;
 let eventObj  = {};
 try {
   eventObj = JSON.parse(sessionStorage.getItem("ep_event_obj") || localStorage.getItem("ep_event_obj") || "{}");
