@@ -362,9 +362,11 @@ if (eventObj.EventName) {
   orgName = eventObj.OrganizerName || "Organisation";
 }
 
-// Load full settings from event API
+// Load full settings from event API — getSettings comes from the event
+// cache (populated during event selection on index.html, valid for 10
+// minutes) instead of always hitting the backend fresh.
 Promise.all([
-  api(EVENT_API, "getSettings").catch(()=>({})),
+  getEventSettingsCached().catch(()=>({})),
   api(EVENT_API, "getPublicVisibility").catch(()=>({})),
   api(EVENT_API, "getPublicStats").catch(()=>({total:0,count:0})),
   api(EVENT_API, "getVillageSuggestions").catch(()=>({villages:[]})),
