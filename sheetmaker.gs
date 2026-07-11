@@ -319,3 +319,6 @@ function applyNumberFormats(sheet, sheetName) {
     sheet.getRange("C:C").setNumberFormat("hh:mm AM/PM");
   }
 }
+
+
+
