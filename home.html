@@ -494,7 +494,15 @@ function finishPayment(){
   const utr=document.getElementById("utr").value.trim();
   if(!utr||utr.length<8){showMsg("payMsg","error","Please enter a valid UTR / Transaction ID (min 8 digits).");return}
   document.getElementById("finishBtn").disabled=true; showProgress();
-  api(EVENT_API,"insertPayment",{refid:userData.refid,name:userData.name,village:userData.village,phone:userData.phone,amount:userData.amount,utr},"POST")
+api(EVENT_API,"insertPayment",{
+    eventSid: selectedEvent?.SpreadsheetID,
+    refid: userData.refid,
+    name: userData.name,
+    village: userData.village,
+    phone: userData.phone,
+    amount: userData.amount,
+    utr: utr
+},"POST")
   .then(res=>{
     completeProgress(); document.getElementById("finishBtn").disabled=false;
     if(res.result==="Inserted"){
