@@ -428,9 +428,8 @@ document.getElementById("mobNavGallery").style.display =
     v.showGallery ? "" : "none";
 
 document.getElementById("mobNavInvite").style.display =
-    v.showInvitation ? "" : "none";
+    v.showInviteCard ? "" : "none";
   
-
 if (!boot || !boot.settings) {
     console.error("Bootstrap failed");
     return;
@@ -438,6 +437,7 @@ if (!boot || !boot.settings) {
 
 // Event settings
 const s = boot.settings;
+const v = boot.visibility || {};
 
 eventName = s.EventName || eventObj.EventName || "Event";
 orgName   = s.OrganizerName || "Organisation";
@@ -450,45 +450,32 @@ villages = boot.villages || [];
 
 // ---------- ICONS ----------
 
-const showDonors =
-    s.ShowDonors === "Yes" ||
-    s.ShowDonors === true;
+[
+ ["navDonors",v.showDonorList],
+ ["mobNavDonors",v.showDonorList],
+ ["qaaDonors",v.showDonorList],
 
-const showGallery =
-    s.ShowGallery === "Yes" ||
-    s.ShowGallery === true;
+ ["navGallery",v.showGallery],
+ ["mobNavGallery",v.showGallery],
+ ["qaaGallery",v.showGallery],
 
-const showInvite =
-    s.ShowInvitation === "Yes" ||
-    s.ShowInvitation === true;
+ ["navInvite",v.showInviteCard],
+ ["mobNavInvite",v.showInviteCard],
+ ["qaaInvite",v.showInviteCard]
 
-document.getElementById("navDonors").style.display =
-    showDonors ? "" : "none";
+].forEach(([id,show])=>{
+    const el=document.getElementById(id);
+    if(el) el.style.display = show ? "" : "none";
+});
 
-document.getElementById("mobNavDonors").style.display =
-    showDonors ? "" : "none";
-
-document.getElementById("qaaDonors").style.display =
-    showDonors ? "flex" : "none";
-
-document.getElementById("navGallery").style.display =
-    showGallery ? "" : "none";
-
-document.getElementById("mobNavGallery").style.display =
-    showGallery ? "" : "none";
-
-document.getElementById("qaaGallery").style.display =
-    showGallery ? "flex" : "none";
-
-document.getElementById("mobNavInvite").style.display =
-    showInvite ? "" : "none";
-
-document.getElementById("qaaInvite").style.display =
-    showInvite ? "flex" : "none";
+console.log("Quick Actions =", document.getElementById("quickActions"));
+console.log("Donor =", document.getElementById("qaaDonors"));
+console.log("Gallery =", document.getElementById("qaaGallery"));
+console.log("Invite =", document.getElementById("qaaInvite"));
 
 })();
 
-
+  
 // VILLAGE AUTOCOMPLETE
 function filterVDD(q){
   const box=document.getElementById("villageDD");
