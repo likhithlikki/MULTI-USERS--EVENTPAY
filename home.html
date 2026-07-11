@@ -328,15 +328,13 @@
   const EVENT_API = APP_CONFIG.SCRIPT_URL;
 
   
-  
 if (!requireEvent()) {
-
     window.location.href = "index.html";
 }
+
 console.log("EVENT SID =", getEventSID());
 console.log("EVENT API =", EVENT_API);
 console.log("CACHE =", getCachedEventData());
-
 
 const CURRENT_EVENT = {
     eid: sessionStorage.getItem(APP_CONFIG.LS.SELECTED_EID),
@@ -344,15 +342,13 @@ const CURRENT_EVENT = {
     name: sessionStorage.getItem(APP_CONFIG.LS.SELECTED_ENAME)
 };
 
- console.log("========== HOME ==========");
-console.log("SID:", getEventSID());
-
-    JSON.parse(sessionStorage.getItem("ep_event_obj") || "{}")
-);
-console.log("==========================");
-
-
-
+console.log("========== HOME ==========");
+console.log("Selected Event ID :", CURRENT_EVENT.eid);
+console.log("Selected Event Name :", CURRENT_EVENT.name);
+console.log("Selected Spreadsheet ID :", CURRENT_EVENT.sid);
+console.log("Event Object :", JSON.parse(sessionStorage.getItem("ep_event_obj") || "{}"));
+console.log("================================");
+  
 let eventObj  = {};
 try {
   eventObj = JSON.parse(sessionStorage.getItem("ep_event_obj") || localStorage.getItem("ep_event_obj") || "{}");
