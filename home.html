@@ -149,6 +149,12 @@
     <a href="donors.html" class="nav-link" id="navDonors" style="display:none">Donors</a>
     <a href="status.html" class="nav-link">Status</a>
     <a href="gallery.html" class="nav-link" id="navGallery" style="display:none">Gallery</a>
+    <a href="invite.html"
+   class="nav-link"
+   id="navInvite"
+   style="display:none">
+   Invite
+</a>
     <a href="complaint.html" class="nav-link">Support</a>
     <a href="index.html" class="nav-link" style="color:var(--text-dim);font-size:11px">⬅ All Events</a>
   </div>
@@ -399,9 +405,86 @@ if (cache) {
 
     console.log("===== BOOTSTRAP =====");
 
-    const boot = await api("getHomeBootstrap");
+   const boot = await api("getHomeBootstrap");
 
-    console.log(boot);
+console.log(boot);
+  console.log("Visibility =", boot.visibility);
+
+const v = boot.visibility || {};
+
+document.getElementById("navDonors").style.display =
+    v.showDonorList ? "" : "none";
+
+document.getElementById("navGallery").style.display =
+    v.showGallery ? "" : "none";
+
+document.getElementById("navInvite").style.display =
+    v.showInvitation ? "" : "none";
+
+document.getElementById("mobNavDonors").style.display =
+    v.showDonorList ? "" : "none";
+
+document.getElementById("mobNavGallery").style.display =
+    v.showGallery ? "" : "none";
+
+document.getElementById("mobNavInvite").style.display =
+    v.showInvitation ? "" : "none";
+  
+
+if (!boot || !boot.settings) {
+    console.error("Bootstrap failed");
+    return;
+}
+
+// Event settings
+const s = boot.settings;
+
+eventName = s.EventName || eventObj.EventName || "Event";
+orgName   = s.OrganizerName || "Organisation";
+upiID     = s.UPI_ID || s.UpiID || s.UPI || "";
+
+document.getElementById("eventTitle").textContent = eventName;
+document.getElementById("navEventName").textContent = eventName;
+
+villages = boot.villages || [];
+
+// ---------- ICONS ----------
+
+const showDonors =
+    s.ShowDonors === "Yes" ||
+    s.ShowDonors === true;
+
+const showGallery =
+    s.ShowGallery === "Yes" ||
+    s.ShowGallery === true;
+
+const showInvite =
+    s.ShowInvitation === "Yes" ||
+    s.ShowInvitation === true;
+
+document.getElementById("navDonors").style.display =
+    showDonors ? "" : "none";
+
+document.getElementById("mobNavDonors").style.display =
+    showDonors ? "" : "none";
+
+document.getElementById("qaaDonors").style.display =
+    showDonors ? "flex" : "none";
+
+document.getElementById("navGallery").style.display =
+    showGallery ? "" : "none";
+
+document.getElementById("mobNavGallery").style.display =
+    showGallery ? "" : "none";
+
+document.getElementById("qaaGallery").style.display =
+    showGallery ? "flex" : "none";
+
+document.getElementById("mobNavInvite").style.display =
+    showInvite ? "" : "none";
+
+document.getElementById("qaaInvite").style.display =
+    showInvite ? "flex" : "none";
 
 })();
 
