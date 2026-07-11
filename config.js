@@ -122,8 +122,27 @@ const r = await fetch(u.toString());
       const body = new URLSearchParams({ action, ...params });
       console.log("POST URL:", APP_CONFIG.SCRIPT_URL);
       console.log("POST BODY:", body.toString());
-      const r = await fetch(APP_CONFIG.SCRIPT_URL, { method: "POST", body });
-      return r.json();
+ const r = await fetch(APP_CONFIG.SCRIPT_URL, {
+    method: "POST",
+    body
+});
+
+console.log("POST STATUS =", r.status);
+console.log("POST OK =", r.ok);
+
+const txt = await r.text();
+
+console.log("POST RESPONSE =", txt);
+
+try {
+    return JSON.parse(txt);
+} catch (e) {
+    return {
+        success: false,
+        error: "Invalid JSON",
+        raw: txt
+    };
+}
     }
   } catch (e) {
     return { error: e.message };
