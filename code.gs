@@ -1,75 +1,4 @@
-// ============================================================
-// EventPay — Code.gs  (SINGLE unified backend, single router)
-// ============================================================
-// This file is the ONLY .gs file in this project that may define
-// doGet / doPost / handleAction. Do NOT paste a second copy of any
-// of these functions anywhere else in the project (Apps Script
-// treats every .gs file as one shared global scope — a duplicate
-// function name anywhere breaks the ENTIRE project at parse time
-// with "Identifier ... has already been declared").
-//
-// ------------------------------------------------------------
-// UPDATE (multi-event fix): resolveSid_() below was already correct
-// — it checks p.sid first, then eventCode, then falls back to
-// DEFAULT_SPREADSHEET_ID. The bug was never in this file: it was
-// that every frontend page called the backend without ever sending
-// "sid" in the first place, so resolveSid_() had nothing to resolve
-// and always fell through to the default. That's fixed in config.js
-// (a single fetch() interceptor now attaches sid to every request
-// automatically). This file only adds: (a) Logger.log tracing inside
-// resolveSid_ so you can confirm from Executions which spreadsheet
-// each request actually resolved to, and (b) getCurrentSpreadsheet(p),
-// a thin named wrapper around SpreadsheetApp.openById(resolveSid_(p))
-// for any NEW code you add later, so future functions have one
-// obvious helper to call instead of reaching for openById() directly.
-// Every existing function below already goes through resolveSid_()
-// correctly and is left as-is to avoid risking working code.
-// ------------------------------------------------------------
-//
-// WHAT THIS FILE FIXES vs the previous "NEW" backend:
-//   1. Response shape. Every page (home.html, donors.html, status.html,
-//      gallery.html, invite.html, complaint.html, admin.html,
-//      admin-login.html) is the OLD, working frontend. It expects FLAT
-//      JSON back — {result:"Inserted"}, {donors:[...]}, {success:true,...}
-//      — never {success:true, data:{...}}. The previous backend wrapped
-//      everything in success/data, which is why every page looked broken
-//      even though nothing was "wrong" on screen: the JS was reading
-//      res.donors / res.payments / res.result and always getting undefined.
-//   2. Action names. The frontend calls insertPayment, validateUTR,
-//      getVillageSuggestions, getRecentTransactions, getPublicPayments,
-//      getGalleryImages, loginAdmin, getPayments, updatePayments,
-//      getComplaints, updateComplaint, insertComplaint, updateSettings,
-//      getAuditLog, getActivity, getSheetsList/getSheetData/updateSheetCell/
-//      addSheetRow/deleteSheetRow, undoActions, addUTRBlacklist,
-//      getUTRBlacklist, addVillageSuggestion — the previous backend had
-//      renamed or dropped most of these (e.g. only had createPaymentOrder/
-//      verifyPayment instead of insertPayment), which is exactly the
-//      "Unknown backend action: insertPayment" error you saw.
-//   3. "+" in event names. Apps Script's manual form-decoder used
-//      decodeURIComponent() directly on POST bodies. decodeURIComponent
-//      does NOT turn "+" into a space (only %XX is a real escape to it —
-//      "+" is a raw character as far as decodeURIComponent is concerned).
-//      Since browsers submit spaces as "+" in
-//      application/x-www-form-urlencoded bodies, "Birthday of Likith"
-//      was arriving as "Birthday+of+Likith" and getting stored that way.
-//      Fixed below in doPost() and with a cleanText_() helper used
-//      everywhere a name is displayed or turned into a folder name.
-//   4. Missing sheets/columns. Folders, gallery, complaints, and admin
-//      login now use header-based lookups (getColMap) everywhere, so
-//      adding a column never breaks anything, and sheets are created
-//      automatically if missing instead of throwing.
-//
-// HOW MULTI-EVENT WORKS NOW (fully backward compatible):
-//   - If a request includes "sid" (a Spreadsheet ID) or "eventCode",
-//     that event's spreadsheet is used.
-//   - If neither is present, DEFAULT_SPREADSHEET_ID below is used —
-//     i.e. every page in this bundle keeps working exactly like the
-//     single-event version, with ZERO changes needed to any .html/.js
-//     file, because config.js now attaches sid to every request itself.
-//   - config.js reads the selected event's Spreadsheet ID from
-//     localStorage/sessionStorage (set by index.html's selectEvent())
-//     and attaches it as "sid" to every fetch() call automatically.
-// ============================================================
+
 
 // ---- Legacy single-event spreadsheet (kept so nothing needs sid/eventCode) ----
 const DEFAULT_SPREADSHEET_ID = "1TsSOerv8tI1oqxrlhdJts5hEyTbY5sfu8m3AD3XxZjM";
@@ -102,62 +31,81 @@ function getRootDriveFolderId_() {
 // 1. HTTP ENTRYPOINTS & ROUTER  (the ONLY doGet/doPost in the project)
 // ============================================================
 
-function doGet(e) {
-  // DEFENSIVE: e is undefined when doGet is run manually from the Apps
-  // Script editor (Run > doGet), by certain warm-up/health-check calls,
-  // or by some monitoring tools that ping the URL without a query string.
-  // Never assume e or e.parameter exist — build a safe params object first.
-  const params = (e && e.parameter) ? e.parameter : {};
-  const action = params.action || "";
-  if (!action) {
+function doPost(e) {
+
+  if (!e) {
     return out_({
-      error: "No action specified. Call this URL with ?action=... — e.g. ?action=getEvents",
-      result: "Error",
-      success: false
+      success: false,
+      message: "Called from Editor",
+      hasEvent: false
     });
   }
-  return out_(handleAction(action, params, null));
+
+  return out_({
+    success: true,
+    message: "DOPOST TEST",
+    postData: e.postData.contents
+  });
 }
 
+
+
 function doPost(e) {
-  // DEFENSIVE: same reasoning as doGet — e (and e.postData) can be
-  // undefined if doPost is invoked in a way that doesn't supply the
-  // normal request event (e.g. run manually from the editor).
-  const params = Object.assign({}, (e && e.parameter) ? e.parameter : {});
-  // FIX: form-urlencoded bodies use "+" for spaces. decodeURIComponent()
-  // does not convert "+" to " " — only real %XX escapes. Convert "+" to
-  // a space FIRST, then decode %XX, or every name/village/complaint with
-  // a space in it comes out as "Birthday+of+Likith".
-  if (e && e.postData && e.postData.type === "application/x-www-form-urlencoded" && e.postData.contents) {
-    e.postData.contents.split("&").forEach(pair => {
-      if (!pair) return;
-      const kv = pair.split("=");
-      const k = decodeURIComponent((kv[0] || "").replace(/\+/g, " "));
-      const v = decodeURIComponent((kv[1] || "").replace(/\+/g, " "));
-      params[k] = v;
-    });
-  }
-  const action = params.action || "";
-  if (!action) {
+
+  Logger.log("===== POST START =====");
+  Logger.log(e.postData.contents);
+
+  try {
+
+    const p = Object.fromEntries(new URLSearchParams(e.postData.contents));
+
+    Logger.log(JSON.stringify(p));
+
+    const result = handleAction(p.action, p, e.postData.contents);
+
+    Logger.log("RESULT = " + JSON.stringify(result));
+
+    return out_(result);
+
+  } catch(err) {
+
+    Logger.log("POST ERROR = " + err);
+
     return out_({
-      error: "No action specified in POST body.",
-      result: "Error",
-      success: false
+      success:false,
+      error:String(err)
     });
+
   }
-  return out_(handleAction(action, params, e ? e.postData : null));
+
 }
 
 function out_(r) {
-  return ContentService.createTextOutput(JSON.stringify(r))
-                        .setMimeType(ContentService.MimeType.JSON);
+
+  Logger.log("========== OUT ==========");
+  Logger.log(JSON.stringify(r));
+  Logger.log("=========================");
+
+  return ContentService
+      .createTextOutput(JSON.stringify(r))
+      .setMimeType(ContentService.MimeType.JSON);
 }
 
 function handleAction(action, p, pd) {
+  Logger.log("ENTER handleAction");
+Logger.log(action);
+  Logger.log("ACTION = " + action);
   try {
     switch (action) {
       // ---- Public / Visitor (per-event, sid/eventCode optional) ----
-      case "getSettings":           return getSettings(p);
+case "getSettings":
+  Logger.log("INSIDE getSettings ROUTER");
+case "getSettings":
+    return {
+        success: true,
+        sid:p.eventSid,
+        hello: "LIKITH"
+    };
       case "getPublicVisibility":   return getPublicVisibility(p);
       case "getPublicStats":        return getPublicStats(p);
       case "getPublicPayments":     return getPublicPayments(p);
@@ -204,6 +152,11 @@ function handleAction(action, p, pd) {
       case "checkDuplicateEvent":    return checkDuplicateEvent(p.organizerEmail, p.eventDate, p.eventName);
       case "submitEventApplication": return submitEventApplicationAction(p);
 
+      case "getHomeBootstrap":
+      Logger.log("ENTER getHomeBootstrap");
+      return getHomeBootstrap(p);  
+
+
       default:
         // Never crash and never show a bare "Unknown backend action" —
         // return a structured, safe JSON error instead (requirement #16).
@@ -212,8 +165,40 @@ function handleAction(action, p, pd) {
   } catch (err) {
     return { error: err.message, result: "Error", success: false };
   }
+  
 }
 
+
+
+function getPublicVisibilityFromSettings_(s) {
+
+  const isActive = (key) =>
+    String(s[key] || "ACTIVE").toUpperCase().trim() === "ACTIVE";
+
+  return {
+
+    showDonorList:          isActive("SHOW_DONOR_LIST"),
+    showStatistics:         isActive("SHOW_STATISTICS"),
+    showHomepageStats:      isActive("SHOW_HOMEPAGE_STATS"),
+    showHomepageDonors:     isActive("SHOW_HOMEPAGE_DONORS"),
+
+    showGallery:            isActive("SHOW_GALLERY"),
+    showInviteCard:         isActive("SHOW_INVITE_CARD"),
+
+    showPendingPayments:    isActive("SHOW_PENDING_PAYMENTS"),
+    showVerifiedPayments:   isActive("SHOW_VERIFIED_PAYMENTS"),
+    showRecentPayments:     isActive("SHOW_RECENT_PAYMENTS"),
+
+    showEngagementGallery:  isActive("SHOW_ENGAGEMENT_GALLERY"),
+    showHaldiGallery:       isActive("SHOW_HALDI_GALLERY"),
+    showMarriageGallery:    isActive("SHOW_MARRIAGE_GALLERY"),
+
+    allowDownloadAll:       isActive("ALLOW_DOWNLOAD_ALL"),
+    allowSectionDownload:   isActive("ALLOW_SECTION_DOWNLOAD")
+
+  };
+
+}
 // ============================================================
 // 2. CORE UTILITY HELPERS
 // ============================================================
@@ -325,11 +310,15 @@ function verifySuperAdmin(params) {
 // that intentionally don't scope to a single event.
 
 function resolveSid_(p) {
+
   let resolved = DEFAULT_SPREADSHEET_ID;
+
+  Logger.log("SID = " + resolved);
+
   let via = "default";
 
-  if (p && p.sid && String(p.sid).trim()) {
-    resolved = String(p.sid).trim();
+  if (p && p.eventSid && String(p.eventSid).trim()) {
+    resolved = String(p.eventSid).trim();
     via = "sid";
   } else {
     const code = p && (p.eventCode || p.code);
@@ -345,7 +334,7 @@ function resolveSid_(p) {
     Logger.log(
       "resolveSid_ | action=%s | received sid=%s | received eventCode=%s | resolved via=%s | resolvedSpreadsheetId=%s",
       (p && p.action) || "(n/a)",
-      (p && p.sid) || "(none)",
+      (p && p.eventSid) || "(none)",
       (p && (p.eventCode || p.code)) || "(none)",
       via,
       resolved
@@ -361,7 +350,11 @@ function resolveSid_(p) {
 // inline — functionally identical to this — and are left untouched.)
 function getCurrentSpreadsheet(p) {
   const sid = resolveSid_(p);
+  Logger.log("OPENING = " + sid);
+
   const ss = SpreadsheetApp.openById(sid);
+  Logger.log("OPENED = " + ss.getName());
+
   try {
     Logger.log("getCurrentSpreadsheet | Opened spreadsheet id=%s | name=%s", sid, ss.getName());
   } catch (e) {}
@@ -377,6 +370,7 @@ const EVENTS_SHEET_HEADERS = [
 
 function getOrCreateEventsSheet_() {
   const ss = SpreadsheetApp.openById(getMasterDbId_());
+  Logger.log("OPENED = " + ss.getName());
   let sheet = ss.getSheetByName("Events");
   if (!sheet) {
     sheet = ss.insertSheet("Events");
@@ -457,13 +451,25 @@ function searchEvent(p) {
 }
 
 function createEventSpreadsheetAction(p) {
+
+const lock = LockService.getDocumentLock();
+lock.waitLock(30000);
+
+try {
+
   try {
     verifySuperAdmin(p);
-    const spreadsheetId = p.targetSpreadsheetId || p.sid;
+    const spreadsheetId = p.targetSpreadsheetId ||p.eventSid ;
     if (!spreadsheetId) return { result: "Error", error: "Target Spreadsheet ID is required." };
     const result = initializeEventSpreadsheet(spreadsheetId);
     return { result: result.success ? "SpreadsheetInitialized" : "Failed" };
   } catch (err) { return { result: "Error", error: err.message }; }
+
+
+}
+finally{
+   lock.releaseLock();
+}
 }
 
 // ============================================================
@@ -476,33 +482,45 @@ function getSettings(p) {
   const data = sheet.getDataRange().getValues();
   const obj = {};
   data.forEach(r => { if (r[0]) obj[String(r[0]).trim()] = r[1]; });
+
+  // ---- KEY ALIASING ----
+  // SheetInit.gs / writeEventSettings_ store these under one specific
+  // spelling ("Event Name", "ORG_NAME", "INVITATION_CARD_DRIVE_LINK"), but
+  // several frontend pages (invite.html, gallery.html, complaint.html,
+  // admin-login.html, admin.html's Settings panel) read a different
+  // spelling ("EventName", "OrganizerName", "InviteCardURL") that was
+  // never actually written anywhere. That mismatch — not a missing
+  // Master DB / sid problem — is why those pages showed "Event" /
+  // blank fields even though the Event Spreadsheet had the right data.
+  // Both spellings are populated here and kept in sync, so every page
+  // can read whichever one it was written to expect.
+  if (obj["Event Name"] !== undefined && obj["EventName"] === undefined) obj["EventName"] = obj["Event Name"];
+  if (obj["EventName"] !== undefined && obj["Event Name"] === undefined) obj["Event Name"] = obj["EventName"];
+  if (obj["ORG_NAME"] !== undefined && obj["OrganizerName"] === undefined) obj["OrganizerName"] = obj["ORG_NAME"];
+  if (obj["OrganizerName"] !== undefined && obj["ORG_NAME"] === undefined) obj["ORG_NAME"] = obj["OrganizerName"];
+  if (obj["INVITATION_CARD_DRIVE_LINK"] !== undefined && obj["InviteCardURL"] === undefined) obj["InviteCardURL"] = obj["INVITATION_CARD_DRIVE_LINK"];
+  if (obj["InviteCardURL"] !== undefined && obj["INVITATION_CARD_DRIVE_LINK"] === undefined) obj["INVITATION_CARD_DRIVE_LINK"] = obj["InviteCardURL"];
+
   if (obj["Event Name"]) obj["Event Name"] = cleanText_(obj["Event Name"]);
   if (obj["EventName"]) obj["EventName"] = cleanText_(obj["EventName"]);
   return obj;
 }
 
 function getPublicVisibility(p) {
-  const s = getSettings(p);
-  const isActive = (key) => String(s[key] || "ACTIVE").toUpperCase().trim() === "ACTIVE";
-  return {
-    showDonorList:          isActive("SHOW_DONOR_LIST"),
-    showStatistics:         isActive("SHOW_STATISTICS"),
-    showHomepageStats:      isActive("SHOW_HOMEPAGE_STATS"),
-    showHomepageDonors:     isActive("SHOW_HOMEPAGE_DONORS"),
-    showGallery:            isActive("SHOW_GALLERY"),
-    showInviteCard:         isActive("SHOW_INVITE_CARD"),
-    showPendingPayments:    isActive("SHOW_PENDING_PAYMENTS"),
-    showVerifiedPayments:   isActive("SHOW_VERIFIED_PAYMENTS"),
-    showRecentPayments:     isActive("SHOW_RECENT_PAYMENTS"),
-    showEngagementGallery:  isActive("SHOW_ENGAGEMENT_GALLERY"),
-    showHaldiGallery:       isActive("SHOW_HALDI_GALLERY"),
-    showMarriageGallery:    isActive("SHOW_MARRIAGE_GALLERY"),
-    allowDownloadAll:       isActive("ALLOW_DOWNLOAD_ALL"),
-    allowSectionDownload:   isActive("ALLOW_SECTION_DOWNLOAD")
-  };
+  return getPublicVisibilityFromSettings_(getSettings(p));
 }
 
 function updateSettings(p) {
+
+
+
+
+const lock = LockService.getDocumentLock();
+lock.waitLock(30000);
+
+try {
+
+
   verifySuperAdmin(p);
   const ss = getCurrentSpreadsheet(p);
   const sheet = ss.getSheetByName("Settings");
@@ -526,6 +544,12 @@ function updateSettings(p) {
   logActivity({ adminUser: p.adminUser, module: "Settings", action: "SettingsUpdate",
     detail: "Updated " + Object.keys(updates).length + " setting(s)" }, p);
   return { result: "Saved" };
+
+
+}
+finally{
+   lock.releaseLock();
+}
 }
 
 // ============================================================
@@ -534,6 +558,7 @@ function updateSettings(p) {
 function loginAdmin(p) {
   const sid = resolveSid_(p);
   const ss = SpreadsheetApp.openById(sid);
+  Logger.log("OPENED = " + ss.getName());
   const sheet = ss.getSheetByName("Admins");
   let matchedRow = null, adminsData = null;
 
@@ -606,6 +631,12 @@ function isUTRBlacklisted(utr, p) {
 }
 
 function addUTRBlacklist(p) {
+
+const lock = LockService.getDocumentLock();
+lock.waitLock(30000);
+
+try {
+
   verifyAdmin(p);
   const ss = getCurrentSpreadsheet(p);
   const sheet = ss.getSheetByName("UTRBlacklist");
@@ -613,6 +644,12 @@ function addUTRBlacklist(p) {
   const n = nowFormatted();
   sheet.appendRow([p.utr, n.full, p.reason || "Manually blacklisted by " + p.adminUser]);
   return { result: "Blacklisted" };
+
+}
+finally{
+   lock.releaseLock();
+}
+
 }
 
 function getUTRBlacklist(p) {
@@ -688,8 +725,35 @@ function validateUTR(p) {
 // 7. PAYMENTS
 // ============================================================
 function insertPayment(p) {
+
+
+Logger.log("STEP 1");
+
+const lock = LockService.getDocumentLock();
+Logger.log("STEP 2");
+lock.waitLock(30000);
+
+Logger.log("STEP 3");
+Logger.log("eventSid = " + p.eventSid);
+const ss = getCurrentSpreadsheet(p);
+
+Logger.log("STEP 4");
+Logger.log(ss.getId());
+
+const sheet = ss.getSheetByName("Payments");
+Logger.log("STEP 5");
+
+try {
+
+
+
+
+  Logger.log("insertPayment sid = " + p.eventSid);
   const ss = getCurrentSpreadsheet(p);
+  Logger.log("Spreadsheet = " + ss.getName());
   const sheet = ss.getSheetByName("Payments");
+  Logger.log("Sheet = " + sheet.getName());
+
   if (!sheet) return { result: "Error", message: "Payments sheet not found" };
   const data = sheet.getDataRange().getValues();
   const col = getColMap(data[0]);
@@ -705,8 +769,14 @@ function insertPayment(p) {
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][phoneC]).trim() === String(p.phone).trim()) return { result: "DuplicatePhone" };
   }
+  
+const utrCheck = validateUTR({
+    utr: p.utr,
+    phone: p.phone,
+    eventSid: p.eventSid,
+    eventCode: p.eventCode
+});
 
-  const utrCheck = validateUTR({ utr: p.utr, phone: p.phone, sid: p.sid, eventCode: p.eventCode });
   if (utrCheck.block) return { result: "DuplicateUTR", message: utrCheck.flags.join(", "), risk: utrCheck.risk };
 
   const n = nowFormatted();
@@ -737,9 +807,24 @@ function insertPayment(p) {
     }
   } catch (e) {}
   return { result: "Inserted", riskLevel: utrCheck.risk };
+
+}
+finally{
+   lock.releaseLock();
 }
 
+}
+
+
+
 function addVillageInternal(villageName, p) {
+
+
+
+
+
+
+
   if (!villageName) return;
   try {
     const ss = getCurrentSpreadsheet(p);
@@ -796,6 +881,49 @@ function getRecentTransactions(p) {
   }
   transactions.sort((a, b) => String(b.date).localeCompare(String(a.date)));
   return { transactions: transactions.slice(0, 10) };
+}
+
+function getHomeBootstrap(p) {
+
+  Logger.log("START getHomeBootstrap");
+
+  try {
+
+    Logger.log("Loading Settings");
+    const settings = getSettings(p);
+
+    Logger.log("Loading Visibility");
+    const visibility = getPublicVisibilityFromSettings_(settings);
+
+    Logger.log("Loading Stats");
+    const stats = getPublicStats(p);
+
+    Logger.log("Loading Villages");
+    const villages = getVillageSuggestions(p);
+
+    Logger.log("Loading Transactions");
+    const recent = getRecentTransactions(p);
+
+    Logger.log("SUCCESS");
+
+    return {
+      settings,
+      visibility,
+      stats,
+      villages: villages.villages || [],
+      transactions: recent.transactions || []
+    };
+
+  } catch (e) {
+
+    Logger.log("ERROR: " + e);
+    Logger.log(e.stack);
+
+    return {
+      error: e.toString(),
+      success: false
+    };
+  }
 }
 
 function checkStatus(p) {
@@ -858,7 +986,14 @@ function getPayments(p) {
 }
 
 function updatePayments(p) {
-  verifyAdmin(p);
+
+
+  const lock = LockService.getDocumentLock();
+lock.waitLock(30000);
+
+try {
+
+ verifyAdmin(p);
   const ss = getCurrentSpreadsheet(p);
   const sheet = ss.getSheetByName("Payments");
   const data = sheet.getDataRange().getValues();
@@ -882,7 +1017,15 @@ function updatePayments(p) {
   logActivity({ adminUser: p.adminUser, module: "Payments", action: "VerifyPayments",
     detail: updates.length + " records updated", oldValue: "", newValue: updates.map(u => u.status).join(",") }, p);
   return { result: "Saved" };
+
 }
+finally{
+   lock.releaseLock();
+}
+
+}
+
+ 
 
 function updatePublicDisplay(p) {
   verifyAdmin(p);
@@ -920,7 +1063,14 @@ function getPublicPayments(p) {
 // 8. COMPLAINTS
 // ============================================================
 function insertComplaint(p) {
-  const ss = getCurrentSpreadsheet(p);
+
+
+const lock = LockService.getDocumentLock();
+lock.waitLock(30000);
+
+try {
+
+ const ss = getCurrentSpreadsheet(p);
   const sheet = ss.getSheetByName("Complaints");
   if (!sheet) return { result: "Error", message: "Complaints sheet not found" };
   const n = nowFormatted();
@@ -965,8 +1115,16 @@ function insertComplaint(p) {
     });
   } catch (e) {}
   return { result: "Inserted", complaintID: cID };
+
+
+}
+finally{
+   lock.releaseLock();
 }
 
+}
+
+ 
 function getComplaints(p) {
   verifyAdmin(p);
   const ss = getCurrentSpreadsheet(p);
@@ -985,6 +1143,15 @@ function getComplaints(p) {
 }
 
 function updateComplaint(p) {
+
+
+const lock = LockService.getDocumentLock();
+lock.waitLock(30000);
+
+try {
+
+
+
   verifyAdmin(p);
   const ss = getCurrentSpreadsheet(p);
   const sheet = ss.getSheetByName("Complaints");
@@ -1015,6 +1182,14 @@ function updateComplaint(p) {
   logActivity({ adminUser: p.adminUser, module: "Complaints", action: "ReplyComplaint",
     detail: "Replied to " + cleanText_(p.name) + " (" + cID + ")", oldValue: String(oldSt), newValue: p.status }, p);
   return { result: "Updated" };
+
+
+
+}
+finally{
+   lock.releaseLock();
+}
+
 }
 
 // ============================================================
@@ -1035,6 +1210,14 @@ function getVillageSuggestions(p) {
 }
 
 function addVillageSuggestion(p) {
+
+
+const lock = LockService.getDocumentLock();
+lock.waitLock(30000);
+
+try {
+
+  
   verifyAdmin(p);
   const ss = getCurrentSpreadsheet(p);
   const sheet = ss.getSheetByName("Villages");
@@ -1049,17 +1232,45 @@ function addVillageSuggestion(p) {
   }
   sheet.appendRow([p.village.trim(), normalized, 1, "Active"]);
   return { result: "Added" };
+
+
+}
+finally{
+   lock.releaseLock();
+}
+
 }
 
 // ============================================================
 // 10. GALLERY — auto-detects eventCode / sid / raw folder IDs
 // ============================================================
+// All possible per-event gallery folder settings this app can create
+// (see FOLDER_NAME_TO_SETTINGS_KEY below, in section 15). A given event
+// only ever has the few relevant to its EventType populated — sections
+// whose settingKey is blank/unset for this event are omitted entirely,
+// but any section that DOES have a folder ID configured is always
+// included in the response, even if that folder currently has zero
+// images, so the frontend can render an empty state instead of quietly
+// hiding the whole section or treating it as a failure.
+const GALLERY_SECTIONS = [
+  { key: "engagement",    label: "Engagement",        settingKey: "ENGAGEMENT_GALLERY_FOLDER_ID" },
+  { key: "haldi",         label: "Haldi Ceremony",     settingKey: "HALDI_GALLERY_FOLDER_ID" },
+  { key: "marriage",      label: "Marriage",           settingKey: "MARRIAGE_GALLERY_FOLDER_ID" },
+  { key: "reception",     label: "Reception",          settingKey: "RECEPTION_GALLERY_FOLDER_ID" },
+  { key: "birthday",      label: "Birthday",           settingKey: "BIRTHDAY_GALLERY_FOLDER_ID" },
+  { key: "anniversary",   label: "Anniversary",        settingKey: "ANNIVERSARY_GALLERY_FOLDER_ID" },
+  { key: "babyshower",    label: "Baby Shower",        settingKey: "BABY_SHOWER_GALLERY_FOLDER_ID" },
+  { key: "housewarming",  label: "House Warming",      settingKey: "HOUSE_WARMING_GALLERY_FOLDER_ID" },
+  { key: "festival",      label: "Temple Festival",    settingKey: "TEMPLE_FESTIVAL_GALLERY_FOLDER_ID" },
+  { key: "corporate",     label: "Corporate Event",    settingKey: "CORPORATE_GALLERY_FOLDER_ID" },
+  { key: "naming",        label: "Naming Ceremony",    settingKey: "NAMING_CEREMONY_GALLERY_FOLDER_ID" },
+  { key: "other",         label: "Event Gallery",      settingKey: "OTHER_GALLERY_FOLDER_ID" },
+  { key: "invitation",    label: "Invitation Card",    settingKey: "INVITATION_FOLDER_ID" }
+];
+
 function getGalleryImages(p) {
   try {
     const s = getSettings(p); // getCurrentSpreadsheet inside getSettings already handles sid/eventCode/default
-    const engFolderID = extractFolderID(s.ENGAGEMENT_GALLERY_FOLDER_ID);
-    const haldiFolderID = extractFolderID(s.HALDI_GALLERY_FOLDER_ID);
-    const marFolderID = extractFolderID(s.MARRIAGE_GALLERY_FOLDER_ID);
 
     function getFolderImages(folderID, section) {
       if (!folderID) return [];
@@ -1079,17 +1290,21 @@ function getGalleryImages(p) {
           }
         }
         return imgs;
-      } catch (e) { return []; }
+      } catch (e) { return []; } // folder missing/inaccessible -> empty, never an error for the whole request
     }
 
-    const sections = {
-      engagement: getFolderImages(engFolderID, "Engagement"),
-      haldi: getFolderImages(haldiFolderID, "Haldi"),
-      marriage: getFolderImages(marFolderID, "Marriage")
-    };
-    const allImages = [...sections.engagement, ...sections.haldi, ...sections.marriage];
-    return { images: allImages, sections };
-  } catch (e) { return { images: [], sections: {}, error: e.message }; }
+    const sections = {};
+    const sectionMeta = [];
+    GALLERY_SECTIONS.forEach(function (sec) {
+      const folderID = extractFolderID(s[sec.settingKey]);
+      if (!folderID) return; // this event never configured this section — omit it, don't show an empty tab for it
+      sections[sec.key] = getFolderImages(folderID, sec.label); // may legitimately be [] — still included
+      sectionMeta.push({ key: sec.key, label: sec.label });
+    });
+
+    const allImages = Object.keys(sections).reduce(function (acc, k) { return acc.concat(sections[k]); }, []);
+    return { images: allImages, sections: sections, sectionMeta: sectionMeta };
+  } catch (e) { return { images: [], sections: {}, sectionMeta: [], error: e.message }; }
 }
 
 // ============================================================
@@ -1181,6 +1396,13 @@ function getAuditLog(p) {
 // 13. UNDO SYSTEM
 // ============================================================
 function undoActions(p) {
+
+
+  const lock = LockService.getDocumentLock();
+lock.waitLock(30000);
+
+try {
+
   verifySuperAdmin(p);
   const scope = p.scope || "last";
   const ss = getCurrentSpreadsheet(p);
@@ -1242,8 +1464,13 @@ function undoActions(p) {
   logActivity({ adminUser: p.adminUser, module: "System", action: "UndoActions",
     detail: "Undone " + undone + " action(s) [scope: " + scope + "]" }, p);
   return { result: "Done", undone, errors };
-}
 
+
+}
+finally{
+   lock.releaseLock();
+}
+}
 // ============================================================
 // 14. SHEET EDITOR (Super Admin Only)
 // ============================================================
@@ -1260,6 +1487,14 @@ function getSheetData(p) {
   return { data, rows: data.length, cols: data[0] ? data[0].length : 0, sheetName: p.sheetName };
 }
 function updateSheetCell(p) {
+
+
+  const lock = LockService.getDocumentLock();
+lock.waitLock(30000);
+
+try {
+
+
   verifySuperAdmin(p);
   const ss = getCurrentSpreadsheet(p);
   const sheet = ss.getSheetByName(p.sheetName);
@@ -1276,9 +1511,23 @@ function updateSheetCell(p) {
   logActivity({ adminUser: p.adminUser, module: "Sheet:" + p.sheetName, action: "CellEdit",
     detail: "Edited " + fieldName + " in row " + row, oldValue: String(oldVal), newValue: String(p.value) }, p);
   return { result: "Updated" };
+
+
 }
+finally{
+   lock.releaseLock();
+}
+}
+
 function addSheetRow(p) {
-  verifySuperAdmin(p);
+  
+
+const lock = LockService.getDocumentLock();
+lock.waitLock(30000);
+
+try {
+
+ 
   const ss = getCurrentSpreadsheet(p);
   const sheet = ss.getSheetByName(p.sheetName);
   if (!sheet) throw new Error("Sheet not found");
@@ -1295,23 +1544,67 @@ function addSheetRow(p) {
     detail: "Added new row " + newRowNum + " to " + p.sheetName }, p);
   return { result: "Added", row: newRowNum };
 }
-function deleteSheetRow(p) {
-  verifySuperAdmin(p);
-  const ss = getCurrentSpreadsheet(p);
-  const sheet = ss.getSheetByName(p.sheetName);
-  if (!sheet) throw new Error("Sheet not found");
-  const row = parseInt(p.row);
-  if (row < 2) throw new Error("Cannot delete header row");
-  const oldData = sheet.getRange(row, 1, 1, sheet.getLastColumn()).getValues()[0];
-  sheet.deleteRow(row);
-  logAudit({ adminUser: p.adminUser, module: "Sheet:" + p.sheetName, action: "DeleteRow",
-    field: "row " + row, oldValue: JSON.stringify(oldData), newValue: "", reason: p.reason || "Deleted",
-    row: row, column: 1 }, p);
-  logActivity({ adminUser: p.adminUser, module: "Sheet:" + p.sheetName, action: "DeleteRow",
-    detail: "Deleted row " + row + " from " + p.sheetName }, p);
-  return { result: "Deleted" };
+
+
+finally{
+   lock.releaseLock();
+}
 }
 
+function deleteSheetRow(p) {
+
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(30000);
+
+  try {
+
+    verifySuperAdmin(p);
+
+    const ss = getCurrentSpreadsheet(p);
+    const sheet = ss.getSheetByName(p.sheetName);
+
+    if (!sheet) throw new Error("Sheet not found");
+
+    const row = parseInt(p.row);
+
+    if (row < 2)
+      throw new Error("Cannot delete header row");
+
+    const oldData =
+      sheet.getRange(row, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+    sheet.deleteRow(row);
+
+    logAudit({
+      adminUser: p.adminUser,
+      module: "Sheet:" + p.sheetName,
+      action: "DeleteRow",
+      field: "row " + row,
+      oldValue: JSON.stringify(oldData),
+      newValue: "",
+      reason: p.reason || "Deleted",
+      row: row,
+      column: 1
+    }, p);
+
+    logActivity({
+      adminUser: p.adminUser,
+      module: "Sheet:" + p.sheetName,
+      action: "DeleteRow",
+      detail: "Deleted row " + row + " from " + p.sheetName
+    }, p);
+
+    return {
+      result: "Deleted"
+    };
+
+  } finally {
+
+    lock.releaseLock();
+
+  }
+}
+ 
 // ============================================================
 // 15. APPLY / CREATE EVENT — OTP + automatic per-event spreadsheet
 // ============================================================
@@ -1379,6 +1672,9 @@ function formatDateOnly_(value) {
 }
 
 function submitEventApplicationAction(p) {
+
+
+
   let formData;
   try { formData = JSON.parse(p.formData || "{}"); }
   catch (err) { return { success: false, message: "Malformed form data." }; }
@@ -1398,7 +1694,9 @@ function submitEventApplication(formData) {
     if (!spreadsheetId) return { success: false, message: "Could not read a valid Google Sheets link." };
 
     let targetSs;
-    try { targetSs = SpreadsheetApp.openById(spreadsheetId); }
+    try { targetSs = SpreadsheetApp.openById(spreadsheetId); 
+    Logger.log(targetSs.getName()); }
+
     catch (err) { return { success: false, message: "Spreadsheet not accessible. Check sharing permissions and the link." }; }
 
     const dup = checkDuplicateEvent(formData.organizerEmail, formData.eventDate, formData.autoEventName);
@@ -1584,6 +1882,7 @@ function writeAdminAccount_(targetSs, username, password, email) {
 
 function logAudit_(entry) {
   const masterSs = SpreadsheetApp.openById(getMasterDbId_());
+ Logger.log(masterSs.getName());;
   let sheet = masterSs.getSheetByName("AuditLog");
   if (!sheet) {
     sheet = masterSs.insertSheet("AuditLog");
