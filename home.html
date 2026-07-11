@@ -412,23 +412,7 @@ console.log(boot);
 
 
 
-document.getElementById("navDonors").style.display =
-    v.showDonorList ? "" : "none";
 
-document.getElementById("navGallery").style.display =
-    v.showGallery ? "" : "none";
-
-document.getElementById("navInvite").style.display =
-    v.showInviteCard ? "" : "none";
-
-document.getElementById("mobNavDonors").style.display =
-    v.showDonorList ? "" : "none";
-
-document.getElementById("mobNavGallery").style.display =
-    v.showGallery ? "" : "none";
-
-document.getElementById("mobNavInvite").style.display =
-    v.showInviteCard ? "" : "none";
   
 if (!boot || !boot.settings) {
     console.error("Bootstrap failed");
@@ -438,6 +422,23 @@ if (!boot || !boot.settings) {
 // Event settings
 const s = boot.settings;
 const v = boot.visibility || {};
+
+  [
+ ["navDonors",v.showDonorList],
+ ["mobNavDonors",v.showDonorList],
+ ["qaaDonors",v.showDonorList],
+
+ ["navGallery",v.showGallery],
+ ["mobNavGallery",v.showGallery],
+ ["qaaGallery",v.showGallery],
+
+ ["navInvite",v.showInviteCard],
+ ["mobNavInvite",v.showInviteCard],
+ ["qaaInvite",v.showInviteCard]
+].forEach(([id,show])=>{
+    const el=document.getElementById(id);
+    if(el) el.style.display = show ? "" : "none";
+});
 
 eventName = s.EventName || eventObj.EventName || "Event";
 orgName   = s.OrganizerName || "Organisation";
@@ -450,23 +451,6 @@ villages = boot.villages || [];
 
 // ---------- ICONS ----------
 
-[
- ["navDonors",v.showDonorList],
- ["mobNavDonors",v.showDonorList],
- ["qaaDonors",v.showDonorList],
-
- ["navGallery",v.showGallery],
- ["mobNavGallery",v.showGallery],
- ["qaaGallery",v.showGallery],
-
- ["navInvite",v.showInviteCard],
- ["mobNavInvite",v.showInviteCard],
- ["qaaInvite",v.showInviteCard]
-
-].forEach(([id,show])=>{
-    const el=document.getElementById(id);
-    if(el) el.style.display = show ? "" : "none";
-});
 
 console.log("Quick Actions =", document.getElementById("quickActions"));
 console.log("Donor =", document.getElementById("qaaDonors"));
