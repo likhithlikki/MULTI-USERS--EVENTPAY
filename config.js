@@ -359,21 +359,18 @@ async function selectEventAndLoad(eid, sid, ename, onStep) {
           const isPost = init && init.method && String(init.method).toUpperCase() === "POST";
           if (isPost) {
             if (init.body instanceof URLSearchParams) {
-             if (!init.body.has("eventSid"))
-    init.body.append("eventSid", sid);
+              if (!init.body.has("eventSid")) init.body.append("eventSid", sid);
             } else if (typeof init.body === "string") {
               const bodyParams = new URLSearchParams(init.body);
-             if (!bodyParams.has("eventSid")) {
-    bodyParams.append("eventSid", sid);
-}
+              if (!bodyParams.has("eventSid")) {
+                bodyParams.append("eventSid", sid);
                 init = Object.assign({}, init, { body: bodyParams.toString() });
               }
             }
           } else {
             const u = new URL(urlStr, window.location.href);
-           if (!u.searchParams.has("eventSid")) {
-    u.searchParams.set("eventSid", sid);
-}
+            if (!u.searchParams.has("eventSid")) {
+              u.searchParams.set("eventSid", sid);
               input = isPlainString ? u.toString() : new Request(u.toString(), input);
             }
           }
@@ -499,6 +496,3 @@ function saveCachedEventData(data){
         ...data
     }));
 }
-
-
-
