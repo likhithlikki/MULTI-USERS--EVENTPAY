@@ -495,7 +495,7 @@ function finishPayment(){
   if(!utr||utr.length<8){showMsg("payMsg","error","Please enter a valid UTR / Transaction ID (min 8 digits).");return}
   document.getElementById("finishBtn").disabled=true; showProgress();
 api(EVENT_API,"insertPayment",{
-    eventSid: selectedEvent?.SpreadsheetID,
+   eventSid: getEventSID(),
     refid: userData.refid,
     name: userData.name,
     village: userData.village,
