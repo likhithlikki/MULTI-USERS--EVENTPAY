@@ -395,27 +395,13 @@ if (cache) {
     console.log("🌐 Loading Home from server");
 }
 
+(async()=>{
 
-  (async () => {
+    console.log("===== BOOTSTRAP =====");
 
-console.log("===== DEBUG START =====");
+    const boot = await api("getHomeBootstrap");
 
-console.log("1 Settings");
-console.log(await getEventSettingsCached());
-
-console.log("2 Visibility");
-console.log(await api(EVENT_API,"getPublicVisibility"));
-
-console.log("3 Stats");
-console.log(await api(EVENT_API,"getPublicStats"));
-
-console.log("4 Villages");
-console.log(await api(EVENT_API,"getVillageSuggestions"));
-
-console.log("5 Transactions");
-console.log(await api(EVENT_API,"getRecentTransactions"));
-
-console.log("===== DEBUG END =====");
+    console.log(boot);
 
 })();
 
