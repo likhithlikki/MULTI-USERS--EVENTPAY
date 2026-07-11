@@ -25,7 +25,7 @@ const APP_CONFIG = {
     SELECTED_EID:   "ep_selected_eid",    // selected event ID
     SELECTED_EURL:  "ep_selected_eurl",   // NOTE: name kept for backward-compat with older
                                            // pages, but this now stores the event's
-                                           // Spreadsheet ID ("sid"), not a second URL.
+                                           // Spreadsheet ID (eventSid), not a second URL.
     SELECTED_ENAME: "ep_selected_ename",
     ADMIN_TOKEN:    "ep_admin_token",
     ADMIN_EXPIRY:   "ep_admin_expiry",
@@ -39,7 +39,7 @@ const APP_CONFIG = {
 // ============================================================
 // STORAGE VERSIONING (THE STALE-SID FIX)
 // ------------------------------------------------------------
-// Root cause found: the browser was caching a selected event's "sid" in
+// Root cause found: the browser was caching a selected event's eventSid in
 // localStorage/sessionStorage indefinitely. After any backend redeploy,
 // Master DB change, or simply switching test events, that cached sid kept
 // being sent on every request — which is exactly what produced "wrong
@@ -137,7 +137,7 @@ function getEventAPI() {
   return APP_CONFIG.SCRIPT_URL;
 }
 
-// Current event's Spreadsheet ID ("sid") — pass this as params.sid
+// Current event's Spreadsheet ID (eventSid) — pass this as params.sid
 // (or params.eventCode, both are accepted by the backend) on every
 // per-event API call.
 function getEventSID() {
@@ -327,14 +327,14 @@ async function selectEventAndLoad(eid, sid, ename, onStep) {
 // complaint.html, admin.html and admin-login.html all call the
 // backend with plain fetch(APP_CONFIG.SCRIPT_URL + "?action=...")
 // or fetch(APP_CONFIG.SCRIPT_URL, {method:"POST", body:...}) and
-// NONE of them ever attached "sid". The backend's resolveSid_()
+// NONE of them ever attached eventSid. The backend's resolveSid_()
 // was already correct (it checks p.sid first) — it just never
 // received one, so it always fell through to DEFAULT_SPREADSHEET_ID.
 //
 // Rather than hand-edit 30+ scattered fetch() call sites (fragile —
 // one missed spot silently reintroduces this exact bug), every
 // request the app makes to APP_CONFIG.SCRIPT_URL is intercepted
-// here, ONE time, and "sid" is attached automatically from the
+// here, ONE time, and eventSid is attached automatically from the
 // currently selected event (getEventSID()) if the caller didn't
 // already set one. This makes sid behave like a global header:
 // no page has to remember it, and no future page can forget it.
