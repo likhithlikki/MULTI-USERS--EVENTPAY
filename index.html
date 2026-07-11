@@ -363,7 +363,12 @@ async function selectEvent(e, evEncoded) {
   const eid = ev.EventID || ev.EventCode;
   const sid = ev.SpreadsheetID || "";
   const ename = ev.EventName || "Event";
-
+console.log("========== EVENT SELECTED ==========");
+console.log("Event Object:", ev);
+console.log("Event Name:", ename);
+console.log("Event ID:", eid);
+console.log("Spreadsheet ID from Master DB:", sid);
+console.log("====================================");
   if (!sid) {
     toast("This event is missing its Spreadsheet ID — cannot open it.", "error");
     return;
@@ -373,6 +378,7 @@ async function selectEvent(e, evEncoded) {
   // cache — this is just the registry row for display purposes).
   await resetEventPayCache();
     setSelectedEvent(eid, sid, ename);
+  setSelectedEvent(eid, sid, ename);
   sessionStorage.setItem("ep_event_obj", JSON.stringify(ev));
   sessionStorage.setItem(
     "ep_event_cache_time",
@@ -399,7 +405,8 @@ async function selectEvent(e, evEncoded) {
   }
 
   sessionStorage.setItem("ep_loading", "true");
- 
+ console.log("Navigating to home.html");
+console.log("Current SID:", getEventSID());
   window.location.href = "home.html";
   
 }
