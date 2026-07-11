@@ -344,13 +344,13 @@ const CURRENT_EVENT = {
     name: sessionStorage.getItem(APP_CONFIG.LS.SELECTED_ENAME)
 };
 
-  console.log("========== HOME ==========");
+ console.log("========== HOME ==========");
 console.log("SID:", getEventSID());
-console.log("Selected Event:", getSelectedEvent());
+console.log(
+    "Selected Event:",
+    JSON.parse(sessionStorage.getItem("ep_event_obj") || "{}")
+);
 console.log("==========================");
-  
-console.log("Selected Event");
-console.log(CURRENT_EVENT);
 
 
 
