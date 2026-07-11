@@ -110,10 +110,18 @@ async function api(a, b, c, d) {
       const u = new URL(APP_CONFIG.SCRIPT_URL);
       u.searchParams.set("action", action);
       Object.entries(params).forEach(([k, v]) => u.searchParams.set(k, String(v)));
-      const r = await fetch(u.toString());
+
+
+console.log("API URL:", u.toString());
+
+const r = await fetch(u.toString());
+
+
       return r.json();
     } else {
       const body = new URLSearchParams({ action, ...params });
+      console.log("POST URL:", APP_CONFIG.SCRIPT_URL);
+      console.log("POST BODY:", body.toString());
       const r = await fetch(APP_CONFIG.SCRIPT_URL, { method: "POST", body });
       return r.json();
     }
