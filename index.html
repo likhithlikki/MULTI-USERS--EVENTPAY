@@ -419,7 +419,7 @@ console.log("Current SID:", getEventSID());
 
 document.addEventListener("DOMContentLoaded", async () => {
 
- 
+ await resetEventPayCache();
     await loadEvents();
   
 });
