@@ -411,7 +411,7 @@ console.log("Current SID:", getEventSID());
   
 }
   document.getElementById("refreshEventsBtn").onclick = async () => {
-
+ await resetEventPayCache();
     location.reload();
 
 };
