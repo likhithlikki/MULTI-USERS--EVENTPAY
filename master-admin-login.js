@@ -132,6 +132,20 @@ function confirmDialog({ title = "Are you sure?", message = "This action cannot 
 }
 
 // ============================================================
+// ICON HELPER
+// Lucide's createIcons() replaces each <i data-lucide="..."> with a
+// real <svg> element, so re-querying for "i" after the first render
+// finds nothing. This helper resets the icon slot's HTML back to a
+// fresh <i data-lucide> before re-running createIcons(), so it's safe
+// to call repeatedly (e.g. toggling eye/eye-off, moon/sun).
+// ============================================================
+function setIcon(container, name) {
+  if (!container) return;
+  container.innerHTML = `<i data-lucide="${name}"></i>`;
+  if (window.lucide) lucide.createIcons();
+}
+
+// ============================================================
 // THEME
 // ============================================================
 function initTheme() {
@@ -141,11 +155,9 @@ function initTheme() {
 function applyTheme(t) {
   document.documentElement.setAttribute("data-theme", t);
   localStorage.setItem(MASTER_CONFIG.LS.THEME, t);
-  const icon = document.querySelector("#themeToggleBtn i");
-  if (icon) icon.setAttribute("data-lucide", t === "dark" ? "moon" : "sun");
+  setIcon(document.getElementById("themeToggleBtn"), t === "dark" ? "moon" : "sun");
   const profileToggle = document.getElementById("profileThemeToggle");
   if (profileToggle) profileToggle.checked = t === "light";
-  if (window.lucide) lucide.createIcons();
 }
 function toggleTheme() {
   const cur = document.documentElement.getAttribute("data-theme");
@@ -164,8 +176,7 @@ function initLogin() {
   toggleBtn.addEventListener("click", () => {
     const showing = pwInput.type === "text";
     pwInput.type = showing ? "password" : "text";
-    toggleBtn.querySelector("i").setAttribute("data-lucide", showing ? "eye" : "eye-off");
-    if (window.lucide) lucide.createIcons();
+    setIcon(toggleBtn, showing ? "eye" : "eye-off");
   });
 
   form.addEventListener("submit", async (e) => {
