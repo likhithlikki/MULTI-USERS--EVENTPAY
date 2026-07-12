@@ -298,27 +298,37 @@
   }
 
   function submitForm(formData) {
-    setLoading(true, "Checking for duplicates…");
 
-    runServer("checkDuplicateEvent", {
-      organizerEmail: formData.organizerEmail,
-      eventDate: formData.eventDate,
-      eventName: formData.autoEventName
-    })
-      .then(function (dupRes) {
-        if (dupRes.duplicate && !state.duplicateAcknowledged) {
-          setLoading(false);
-          var box = document.getElementById("duplicateWarning");
-          box.textContent = dupRes.message + " Click Create Event again to proceed anyway.";
-          box.classList.remove("hidden");
-          state.duplicateAcknowledged = true;
-          return;
-        }
+  setLoading(true, "Checking for duplicates…");
 
-     setLoading(true, "Creating your event & spreadsheet...");
+  runServer("checkDuplicateEvent", {
+    organizerEmail: formData.organizerEmail,
+    eventDate: formData.eventDate,
+    eventName: formData.autoEventName
+  })
 
-return runServer("submitEventApplication", formData)
-.then(function (res) {
+  .then(function (dupRes) {
+
+    if (dupRes.duplicate && !state.duplicateAcknowledged) {
+
+      setLoading(false);
+
+      var box = document.getElementById("duplicateWarning");
+      box.textContent =
+        dupRes.message + " Click Create Event again to proceed anyway.";
+
+      box.classList.remove("hidden");
+      state.duplicateAcknowledged = true;
+      return;
+    }
+
+    setLoading(true, "Creating your event & spreadsheet...");
+
+    return runServer("submitEventApplication", formData);
+
+  })
+
+  .then(function (res) {
 
     setLoading(false);
 
@@ -326,26 +336,28 @@ return runServer("submitEventApplication", formData)
 
     if (res.success) {
 
-        showResult(res);
-        goToStep(5);
+      showResult(res);
+      goToStep(5);
 
     } else {
 
-        console.error("Submit Error:", res);
-        alert(JSON.stringify(res, null, 2));
-        showToast(res.message || "Something went wrong.");
+      console.error("Submit Error:", res);
+      alert(JSON.stringify(res, null, 2));
+      showToast(res.message || "Something went wrong.");
 
     }
 
-});
-        });
-      })
-      .catch(function (err) {
-        setLoading(false);
-        showToast("Error: " + err);
-      });
-  }
+  })
 
+  .catch(function (err) {
+
+    setLoading(false);
+    console.error(err);
+    showToast("Error: " + err);
+
+  });
+
+}
   // ---------------------------------------------------------
   // RESULT / SUCCESS SCREEN
   // ---------------------------------------------------------
