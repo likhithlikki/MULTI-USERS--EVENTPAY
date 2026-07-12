@@ -153,10 +153,19 @@
             showToast(res.message || "Failed to send OTP.");
           }
         })
-        .catch(function (err) {
-          setLoading(false);
-          showToast("Error sending OTP: " + err);
-        });
+     .catch(function (err) {
+    setLoading(false);
+
+    console.error(err);
+
+    alert(
+        err && err.stack
+            ? err.stack
+            : JSON.stringify(err, null, 2)
+    );
+
+    showToast("Error: " + err);
+});
     });
 
     document.getElementById("verifyOtpBtn").addEventListener("click", function () {
@@ -179,10 +188,19 @@
             showToast(res.message || "Invalid OTP.");
           }
         })
-        .catch(function (err) {
-          setLoading(false);
-          showToast("Error verifying OTP: " + err);
-        });
+     .catch(function (err) {
+    setLoading(false);
+
+    console.error(err);
+
+    alert(
+        err && err.stack
+            ? err.stack
+            : JSON.stringify(err, null, 2)
+    );
+
+    showToast("Error: " + err);
+});
     });
   }
 
@@ -300,12 +318,15 @@
         setLoading(true, "Creating your event & spreadsheet…");
         return runServer("submitEventApplication", { formData: JSON.stringify(formData) }).then(function (res) {
           setLoading(false);
-          if (res.success) {
-            showResult(res);
-            goToStep(5);
-          } else {
-            showToast(res.message || "Something went wrong.");
-          }
+         console.log("submitEventApplication response:", res);
+
+if (res.success) {
+    showResult(res);
+    goToStep(5);
+} else {
+    alert(JSON.stringify(res, null, 2));
+    showToast(res.message || "Something went wrong.");
+}
         });
       })
       .catch(function (err) {
