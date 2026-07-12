@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Master Admin · EventPay Platform Control Center</title>
+<link rel="stylesheet" href="master-admin_login.css">
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js" defer></script>
+</head>
+<body>
+
+<!-- ============================================================
+     TOAST CONTAINER
+============================================================ -->
+<div id="toastContainer" class="toast-container"></div>
+
+<!-- ============================================================
+     CONFIRM DIALOG (generic, reused by every destructive action)
+============================================================ -->
+<div id="confirmOverlay" class="overlay hidden">
+  <div class="confirm-card glass">
+    <div class="confirm-icon" id="confirmIcon"><i data-lucide="alert-triangle"></i></div>
+    <h3 id="confirmTitle">Are you sure?</h3>
+    <p id="confirmMessage">This action cannot be undone.</p>
+    <div class="confirm-actions">
+      <button class="btn btn-ghost" id="confirmCancelBtn">Cancel</button>
+      <button class="btn btn-danger" id="confirmOkBtn">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     LOGIN SCREEN
+============================================================ -->
+<div id="loginScreen" class="login-screen">
+  <div class="login-bg-grid"></div>
+  <div class="login-bg-glow"></div>
+
+  <div class="login-card glass">
+    <div class="login-brand">
+      <div class="login-brand-icon">⚡</div>
+      <h1>Master Admin</h1>
+      <p>EventPay Platform Control Center</p>
+    </div>
+
+    <form id="loginForm" class="login-form" autocomplete="off">
+      <!-- Password only — there is a single Master Admin, authenticated
+           against the MASTER-ADMIN-PASS Apps Script property. No username
+           field: identity is fixed, only the secret varies. -->
+      <label class="field">
+        <span class="field-label">Master Password</span>
+        <div class="field-input-wrap">
+          <i data-lucide="lock" class="field-icon"></i>
+          <input type="password" id="masterPassword" name="masterPassword"
+                 placeholder="Enter master password" required autocomplete="current-password">
+          <button type="button" id="togglePasswordBtn" class="field-toggle" aria-label="Show password">
+            <i data-lucide="eye"></i>
+          </button>
+        </div>
+      </label>
+
+      <div class="login-row">
+        <label class="checkbox">
+          <input type="checkbox" id="rememberMe">
+          <span class="checkbox-box"></span>
+          <span>Remember me</span>
+        </label>
+        <button type="button" id="forgotPasswordBtn" class="link-btn">Forgot password?</button>
+      </div>
+
+      <button type="submit" id="loginBtn" class="btn btn-primary btn-block">
+        <span class="btn-label">Login</span>
+        <span class="btn-spinner hidden"></span>
+      </button>
+
+      <p class="login-error hidden" id="loginError"></p>
+    </form>
+
+    <div class="login-footer">EventPay &middot; Master Control Layer &middot; v4.0</div>
+  </div>
+</div>
+
+<!-- ============================================================
+     FORGOT PASSWORD MODAL
+============================================================ -->
+<div id="forgotOverlay" class="overlay hidden">
+  <div class="modal-card glass">
+    <div class="modal-header">
+      <h3>Reset master password</h3>
+      <button class="icon-btn" id="closeForgotBtn"><i data-lucide="x"></i></button>
+    </div>
+    <p class="modal-sub">Master password resets are handled outside this panel for security. Contact the platform owner or update <code>MASTER-ADMIN-PASS</code> directly in Apps Script Project Properties.</p>
+    <button class="btn btn-primary btn-block" id="forgotOkBtn">Got it</button>
+  </div>
+</div>
+
+<!-- ============================================================
+     DASHBOARD SHELL (hidden until login succeeds)
+============================================================ -->
+<div id="dashboardShell" class="shell hidden">
+
+  <!-- ---------- HEADER ---------- -->
+  <header class="topbar glass">
+    <div class="topbar-left">
+      <button class="icon-btn only-mobile" id="mobileMenuBtn"><i data-lucide="menu"></i></button>
+      <div class="topbar-brand">
+        <span class="topbar-brand-icon">⚡</span>
+        <div>
+          <div class="topbar-title">Master Admin</div>
+          <div class="topbar-subtitle">EventPay Platform Control Center</div>
+        </div>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <button class="icon-btn" id="themeToggleBtn" title="Toggle theme"><i data-lucide="moon"></i></button>
+      <button class="icon-btn" id="refreshBtn" title="Refresh"><i data-lucide="refresh-cw"></i></button>
+      <button class="icon-btn has-dot" id="notifBtn" title="Notifications"><i data-lucide="bell"></i></button>
+      <div class="session-timer" id="sessionTimer" title="Session time remaining">
+        <i data-lucide="timer"></i><span id="sessionTimerText">60:00</span>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="logoutBtn"><i data-lucide="log-out"></i><span>Logout</span></button>
+    </div>
+  </header>
+
+  <div class="shell-body">
+
+    <!-- ---------- SIDEBAR ---------- -->
+    <aside class="sidebar glass" id="sidebar">
+      <nav class="nav">
+        <button class="nav-item active" data-view="dashboard"><i data-lucide="layout-dashboard"></i><span>Dashboard</span></button>
+        <button class="nav-item" data-view="events"><i data-lucide="calendar-days"></i><span>Events</span></button>
+        <button class="nav-item" data-view="globalSettings"><i data-lucide="settings"></i><span>Global Settings</span></button>
+        <button class="nav-item" data-view="subscriptionPlans"><i data-lucide="badge-percent"></i><span>Subscription Plans</span></button>
+        <button class="nav-item" data-view="paymentGateway"><i data-lucide="credit-card"></i><span>Payment Gateway</span></button>
+        <button class="nav-item" data-view="emailSettings"><i data-lucide="mail"></i><span>Email Settings</span></button>
+        <button class="nav-item" data-view="applications"><i data-lucide="inbox"></i><span>Applications</span><span class="nav-badge" id="applicationsBadge">0</span></button>
+        <button class="nav-item" data-view="auditTrail"><i data-lucide="history"></i><span>Audit Trail</span></button>
+        <button class="nav-item" data-view="masterDatabase"><i data-lucide="database"></i><span>Master Database</span></button>
+        <button class="nav-item" data-view="profile"><i data-lucide="user-circle"></i><span>Profile</span></button>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="sidebar-status"><span class="status-dot online"></span> Backend not connected</div>
+      </div>
+    </aside>
+    <div class="sidebar-scrim" id="sidebarScrim"></div>
+
+    <!-- ---------- MAIN CONTENT ---------- -->
+    <main class="main">
+
+      <!-- ================= DASHBOARD VIEW ================= -->
+      <section class="view active" id="view-dashboard">
+        <div class="view-head">
+          <div>
+            <h2>Dashboard</h2>
+            <p class="view-sub">Live overview of the entire EventPay platform</p>
+          </div>
+        </div>
+
+        <div class="stat-grid" id="statGrid">
+          <!-- Populated by renderStatCards() in JS. Skeletons shown until then. -->
+        </div>
+
+        <div class="card glass empty-card">
+          <i data-lucide="activity"></i>
+          <h3>Recent activity will appear here</h3>
+          <p>Once connected to the backend, the latest event creations, applications and payments will stream into this panel.</p>
+        </div>
+      </section>
+
+      <!-- ================= EVENTS VIEW ================= -->
+      <section class="view" id="view-events">
+        <div class="view-head">
+          <div>
+            <h2>Events</h2>
+            <p class="view-sub">Every event created on the platform, sourced from the Master Database</p>
+          </div>
+          <button class="btn btn-primary btn-sm" id="exportEventsBtn"><i data-lucide="download"></i><span>Export</span></button>
+        </div>
+
+        <div class="card glass events-card">
+          <div class="table-toolbar">
+            <div class="search-wrap">
+              <i data-lucide="search"></i>
+              <input type="text" id="eventsSearch" placeholder="Search by event name, code, organizer, email...">
+            </div>
+            <div class="toolbar-controls">
+              <select id="eventsFilterStatus" class="select">
+                <option value="">All statuses</option>
+                <option value="Active">Active</option>
+                <option value="Expired">Expired</option>
+                <option value="Deactivated">Deactivated</option>
+              </select>
+              <select id="eventsFilterPlan" class="select">
+                <option value="">All plans</option>
+                <option value="Free">Free</option>
+                <option value="Basic">Basic</option>
+                <option value="Premium">Premium</option>
+                <option value="Enterprise">Enterprise</option>
+              </select>
+              <select id="eventsSort" class="select">
+                <option value="createdDesc">Newest first</option>
+                <option value="createdAsc">Oldest first</option>
+                <option value="nameAsc">Name A–Z</option>
+                <option value="nameDesc">Name Z–A</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="table-scroll">
+            <table class="data-table" id="eventsTable">
+              <thead>
+                <tr>
+                  <th>Event ID</th>
+                  <th>Event Code</th>
+                  <th>Event Name</th>
+                  <th>Organizer</th>
+                  <th>Phone</th>
+                  <th>Email</th>
+                  <th>Plan</th>
+                  <th>Status</th>
+                  <th>Created Date</th>
+                  <th>Spreadsheet</th>
+                  <th class="col-actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="eventsTableBody">
+                <!-- Rows injected by renderEventsTable(). Empty state shown until data loads. -->
+              </tbody>
+            </table>
+            <div class="empty-state hidden" id="eventsEmptyState">
+              <i data-lucide="calendar-x"></i>
+              <h3>No events yet</h3>
+              <p>Events created on the platform will show up here once the backend is connected.</p>
+            </div>
+          </div>
+
+          <div class="pagination" id="eventsPagination">
+            <button class="icon-btn" id="eventsPrevPage"><i data-lucide="chevron-left"></i></button>
+            <span id="eventsPageInfo">Page 1 of 1</span>
+            <button class="icon-btn" id="eventsNextPage"><i data-lucide="chevron-right"></i></button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= EVENT DETAILS PANEL (slide-over) ================= -->
+      <div class="overlay hidden" id="eventDetailsOverlay">
+        <aside class="side-panel glass" id="eventDetailsPanel">
+          <div class="side-panel-head">
+            <h3 id="eventDetailsTitle">Event Details</h3>
+            <button class="icon-btn" id="closeEventDetailsBtn"><i data-lucide="x"></i></button>
+          </div>
+
+          <div class="side-panel-body">
+            <div class="detail-block">
+              <h4>General</h4>
+              <div class="detail-grid" id="eventDetailsGeneral"></div>
+            </div>
+            <div class="detail-block">
+              <h4>Organizer</h4>
+              <div class="detail-grid" id="eventDetailsOrganizer"></div>
+            </div>
+            <div class="detail-block">
+              <h4>Venue</h4>
+              <div class="detail-grid" id="eventDetailsVenue"></div>
+            </div>
+
+            <div class="detail-actions" id="eventDetailsActions">
+              <button class="btn btn-secondary btn-sm" data-action="openSpreadsheet"><i data-lucide="sheet"></i>Open Spreadsheet</button>
+              <button class="btn btn-secondary btn-sm" data-action="copySpreadsheetId"><i data-lucide="copy"></i>Copy Spreadsheet ID</button>
+              <button class="btn btn-secondary btn-sm" data-action="openParentFolder"><i data-lucide="folder"></i>Open Parent Folder</button>
+              <button class="btn btn-secondary btn-sm" data-action="openPublicSite"><i data-lucide="globe"></i>Open Public Website</button>
+              <button class="btn btn-secondary btn-sm" data-action="openAdminDashboard"><i data-lucide="layout-dashboard"></i>Open Admin Dashboard</button>
+              <button class="btn btn-secondary btn-sm" data-action="openComplaintFolder"><i data-lucide="folder-open"></i>Open Complaint Folder</button>
+              <button class="btn btn-secondary btn-sm" data-action="openGalleryFolder"><i data-lucide="image"></i>Open Gallery Folder</button>
+              <button class="btn btn-secondary btn-sm" data-action="openInvitationFolder"><i data-lucide="folder-open"></i>Open Invitation Folder</button>
+              <button class="btn btn-secondary btn-sm" data-action="downloadBackup"><i data-lucide="hard-drive-download"></i>Download Backup</button>
+            </div>
+
+            <div class="detail-block">
+              <div class="detail-block-head">
+                <h4>Spreadsheet Preview</h4>
+                <button class="btn btn-ghost btn-sm" id="loadSpreadsheetPreviewBtn"><i data-lucide="table"></i>Load preview</button>
+              </div>
+
+              <div class="sheet-preview hidden" id="sheetPreview">
+                <div class="sheet-toolbar">
+                  <div class="sheet-tabs" id="sheetTabs"></div>
+                  <div class="sheet-toolbar-actions">
+                    <button class="icon-btn" id="sheetRefreshBtn" title="Refresh"><i data-lucide="refresh-cw"></i></button>
+                    <div class="search-wrap sheet-search">
+                      <i data-lucide="search"></i>
+                      <input type="text" id="sheetSearchInput" placeholder="Search this sheet...">
+                    </div>
+                    <button class="icon-btn" id="sheetDownloadCsvBtn" title="Download CSV"><i data-lucide="download"></i></button>
+                    <button class="icon-btn" id="sheetOpenInGoogleBtn" title="Open in Google Sheets"><i data-lucide="external-link"></i></button>
+                  </div>
+                </div>
+                <div class="sheet-grid-scroll">
+                  <table class="sheet-grid" id="sheetGridTable"></table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <!-- ================= GLOBAL SETTINGS VIEW ================= -->
+      <section class="view" id="view-globalSettings">
+        <div class="view-head">
+          <div>
+            <h2>Global Settings</h2>
+            <p class="view-sub">Controls what information is sent automatically across the platform</p>
+          </div>
+        </div>
+
+        <div class="settings-grid" id="globalSettingsGrid">
+          <!-- Populated by renderGlobalSettings() -->
+        </div>
+      </section>
+
+      <!-- ================= SUBSCRIPTION PLANS VIEW ================= -->
+      <section class="view" id="view-subscriptionPlans">
+        <div class="view-head">
+          <div>
+            <h2>Subscription Plans</h2>
+            <p class="view-sub">Pricing and feature limits offered to organizers</p>
+          </div>
+        </div>
+
+        <div class="plans-grid" id="plansGrid">
+          <!-- Populated by renderPlans() -->
+        </div>
+      </section>
+
+      <!-- ================= PAYMENT GATEWAY VIEW ================= -->
+      <section class="view" id="view-paymentGateway">
+        <div class="view-head">
+          <div>
+            <h2>Payment Gateway</h2>
+            <p class="view-sub">Configure how the platform collects payments</p>
+          </div>
+        </div>
+
+        <div class="card glass form-card">
+          <div class="setting-row">
+            <div>
+              <div class="setting-title">Enable Payment Gateway</div>
+              <div class="setting-desc">Turn on to allow organizers to accept payments through this gateway.</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="pgEnabled"><span class="slider"></span></label>
+          </div>
+
+          <div class="form-grid">
+            <label class="field">
+              <span class="field-label">Gateway</span>
+              <select id="pgProvider" class="select">
+                <option value="razorpay">Razorpay</option>
+                <option value="stripe">Stripe</option>
+                <option value="cashfree">CashFree</option>
+                <option value="phonepe">PhonePe</option>
+                <option value="upi">UPI</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="field-label">Merchant ID</span>
+              <input type="text" id="pgMerchantId" placeholder="e.g. rzp_live_xxxxxxxx">
+            </label>
+            <label class="field">
+              <span class="field-label">Secret</span>
+              <input type="password" id="pgSecret" placeholder="••••••••••••">
+            </label>
+            <label class="field">
+              <span class="field-label">Webhook URL</span>
+              <input type="text" id="pgWebhook" placeholder="https://...">
+            </label>
+          </div>
+
+          <div class="setting-row">
+            <div>
+              <div class="setting-title">Test Mode</div>
+              <div class="setting-desc">Use sandbox credentials — no real money moves.</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="pgTestMode" checked><span class="slider"></span></label>
+          </div>
+
+          <div class="form-actions">
+            <button class="btn btn-primary" id="savePaymentGatewayBtn"><i data-lucide="save"></i>Save</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= EMAIL SETTINGS VIEW ================= -->
+      <section class="view" id="view-emailSettings">
+        <div class="view-head">
+          <div>
+            <h2>Email Settings</h2>
+            <p class="view-sub">How platform emails are sent and signed</p>
+          </div>
+        </div>
+
+        <div class="card glass form-card">
+          <div class="form-grid">
+            <label class="field">
+              <span class="field-label">Sender Name</span>
+              <input type="text" id="esSenderName" placeholder="EventPay">
+            </label>
+            <label class="field">
+              <span class="field-label">Reply Email</span>
+              <input type="email" id="esReplyEmail" placeholder="reply@eventpay.app">
+            </label>
+            <label class="field">
+              <span class="field-label">Support Email</span>
+              <input type="email" id="esSupportEmail" placeholder="support@eventpay.app">
+            </label>
+            <label class="field">
+              <span class="field-label">Organization Email</span>
+              <input type="email" id="esOrgEmail" placeholder="hello@eventpay.app">
+            </label>
+          </div>
+          <label class="field">
+            <span class="field-label">Footer</span>
+            <textarea id="esFooter" rows="2" placeholder="© EventPay. All rights reserved."></textarea>
+          </label>
+          <label class="field">
+            <span class="field-label">Signature</span>
+            <textarea id="esSignature" rows="2" placeholder="— The EventPay Team"></textarea>
+          </label>
+          <label class="field">
+            <span class="field-label">Logo</span>
+            <div class="upload-row">
+              <div class="upload-preview" id="esLogoPreview"><i data-lucide="image"></i></div>
+              <input type="file" id="esLogoUpload" accept="image/*" hidden>
+              <button class="btn btn-ghost btn-sm" id="esLogoUploadBtn" type="button"><i data-lucide="upload"></i>Upload logo</button>
+            </div>
+          </label>
+
+          <div class="form-actions">
+            <button class="btn btn-ghost" id="sendTestEmailBtn"><i data-lucide="send"></i>Send Test Email</button>
+            <button class="btn btn-primary" id="saveEmailSettingsBtn"><i data-lucide="save"></i>Save</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= APPLICATIONS VIEW ================= -->
+      <section class="view" id="view-applications">
+        <div class="view-head">
+          <div>
+            <h2>Applications</h2>
+            <p class="view-sub">Pending event applications awaiting review</p>
+          </div>
+        </div>
+
+        <div class="table-toolbar no-card">
+          <div class="search-wrap">
+            <i data-lucide="search"></i>
+            <input type="text" id="applicationsSearch" placeholder="Search applications...">
+          </div>
+          <select id="applicationsFilter" class="select">
+            <option value="">All</option>
+            <option value="pending">Pending</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+          </select>
+        </div>
+
+        <div class="applications-grid" id="applicationsGrid">
+          <!-- Populated by renderApplications() -->
+        </div>
+        <div class="empty-state hidden" id="applicationsEmptyState">
+          <i data-lucide="inbox"></i>
+          <h3>No pending applications</h3>
+          <p>New organizer applications will appear here for approval.</p>
+        </div>
+      </section>
+
+      <!-- ================= AUDIT TRAIL VIEW ================= -->
+      <section class="view" id="view-auditTrail">
+        <div class="view-head">
+          <div>
+            <h2>Audit Trail</h2>
+            <p class="view-sub">Every action taken across the platform</p>
+          </div>
+        </div>
+
+        <div class="table-toolbar no-card">
+          <div class="search-wrap">
+            <i data-lucide="search"></i>
+            <input type="text" id="auditSearch" placeholder="Search by user, action, IP...">
+          </div>
+          <select id="auditFilter" class="select">
+            <option value="">All actions</option>
+            <option value="Created Event">Created Event</option>
+            <option value="Login">Login</option>
+            <option value="Approved Application">Approved Application</option>
+            <option value="Rejected Application">Rejected Application</option>
+            <option value="Deactivated Event">Deactivated Event</option>
+          </select>
+        </div>
+
+        <div class="card glass">
+          <div class="timeline" id="auditTimeline">
+            <!-- Populated by renderAuditTrail() -->
+          </div>
+          <div class="empty-state hidden" id="auditEmptyState">
+            <i data-lucide="history"></i>
+            <h3>No activity recorded yet</h3>
+            <p>Audit events will appear here in chronological order.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= MASTER DATABASE VIEW ================= -->
+      <section class="view" id="view-masterDatabase">
+        <div class="view-head">
+          <div>
+            <h2>Master Database</h2>
+            <p class="view-sub">The single spreadsheet that backs the entire platform</p>
+          </div>
+        </div>
+
+        <div class="info-card-grid">
+          <div class="card glass info-card">
+            <div class="info-card-icon"><i data-lucide="database"></i></div>
+            <div class="info-card-body">
+              <div class="info-card-label">Master Spreadsheet ID</div>
+              <div class="info-card-value" id="masterDbId">Not connected</div>
+            </div>
+            <div class="info-card-actions">
+              <button class="btn btn-ghost btn-sm" id="openMasterDbBtn"><i data-lucide="external-link"></i>Open</button>
+              <button class="btn btn-ghost btn-sm" id="copyMasterDbIdBtn"><i data-lucide="copy"></i>Copy</button>
+            </div>
+          </div>
+
+          <div class="card glass info-card">
+            <div class="info-card-icon"><i data-lucide="shield-check"></i></div>
+            <div class="info-card-body">
+              <div class="info-card-label">Latest Backup</div>
+              <div class="info-card-value" id="masterDbLastBackup">No backup yet</div>
+            </div>
+            <div class="info-card-actions">
+              <button class="btn btn-ghost btn-sm" id="downloadMasterBackupBtn"><i data-lucide="download"></i>Download</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card glass">
+          <div class="setting-row">
+            <div>
+              <div class="setting-title">Create Backup</div>
+              <div class="setting-desc">Snapshot the current Master Database to Drive.</div>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="createBackupBtn"><i data-lucide="save"></i>Create</button>
+          </div>
+          <div class="setting-row">
+            <div>
+              <div class="setting-title">Restore Backup</div>
+              <div class="setting-desc">Roll the Master Database back to a previous snapshot.</div>
+            </div>
+            <button class="btn btn-danger btn-sm" id="restoreBackupBtn"><i data-lucide="rotate-ccw"></i>Restore</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= PROFILE VIEW ================= -->
+      <section class="view" id="view-profile">
+        <div class="view-head">
+          <div>
+            <h2>Profile</h2>
+            <p class="view-sub">Master admin account settings</p>
+          </div>
+        </div>
+
+        <div class="card glass profile-card">
+          <div class="profile-photo-row">
+            <div class="profile-photo" id="profilePhotoPreview"><i data-lucide="user"></i></div>
+            <div>
+              <input type="file" id="profilePhotoUpload" accept="image/*" hidden>
+              <button class="btn btn-ghost btn-sm" id="profilePhotoUploadBtn"><i data-lucide="upload"></i>Change photo</button>
+            </div>
+          </div>
+
+          <label class="field">
+            <span class="field-label">Master Username</span>
+            <input type="text" id="profileUsername" value="master" disabled>
+          </label>
+
+          <div class="divider"></div>
+
+          <h4>Change Password</h4>
+          <div class="form-grid">
+            <label class="field">
+              <span class="field-label">Current Password</span>
+              <input type="password" id="pwCurrent" placeholder="••••••••">
+            </label>
+            <label class="field">
+              <span class="field-label">New Password</span>
+              <input type="password" id="pwNew" placeholder="••••••••">
+            </label>
+            <label class="field">
+              <span class="field-label">Confirm New Password</span>
+              <input type="password" id="pwConfirm" placeholder="••••••••">
+            </label>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" id="changePasswordBtn"><i data-lucide="key-round"></i>Update Password</button>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="setting-row">
+            <div>
+              <div class="setting-title">Theme</div>
+              <div class="setting-desc">Switch between dark and light mode.</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="profileThemeToggle"><span class="slider"></span></label>
+          </div>
+
+          <div class="form-actions">
+            <button class="btn btn-danger" id="profileLogoutBtn"><i data-lucide="log-out"></i>Logout</button>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<script src="master-admin_login.js"></script>
+</body>
+</html>
