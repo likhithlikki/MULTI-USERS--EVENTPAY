@@ -231,12 +231,7 @@
         return;
       }
 
-      var formData = collectFormData();
-      if (!formData.spreadsheetLink) {
-        showToast("Please paste your Google Spreadsheet link.");
-        return;
-      }
-     
+     var formData = collectFormData();
 
       submitForm(formData);
     });
