@@ -322,7 +322,8 @@
       return;
     }
 
-    setLoading(true, "Creating your event & spreadsheet...");
+setLoading(true, "Creating your event...\nEstimated time: less than 1 minute.");
+startLoadingCountdown();
 
     return runServer("submitEventApplication", formData);
 
@@ -335,7 +336,7 @@
     console.log("submitEventApplication response:", res);
 
     if (res.success) {
-
+stopLoadingCountdown();
       showResult(res);
       goToStep(5);
 
@@ -343,6 +344,7 @@
 
       console.error("Submit Error:", res);
       alert(JSON.stringify(res, null, 2));
+      stopLoadingCountdown();
       showToast(res.message || "Something went wrong.");
 
     }
@@ -350,7 +352,7 @@
   })
 
   .catch(function (err) {
-
+stopLoadingCountdown();
     setLoading(false);
     console.error(err);
     showToast("Error: " + err);
@@ -500,3 +502,59 @@ return fetch(APP_CONFIG.SCRIPT_URL, {
   }
 
 })();
+
+
+
+
+let loadingTimer = null;
+let loadingSeconds = 60;
+
+function startLoadingCountdown() {
+
+    loadingSeconds = 60;
+
+    const txt = document.getElementById("loadingText");
+
+    if (loadingTimer) clearInterval(loadingTimer);
+
+    txt.innerHTML =
+        "Creating your event...<br>" +
+        "This may take up to 1 minute.<br><br>" +
+        "<b>Time Remaining: 60 sec</b>";
+
+    loadingTimer = setInterval(() => {
+
+        loadingSeconds--;
+
+        txt.innerHTML =
+            "Creating your event...<br>" +
+            "This may take up to 1 minute.<br><br>" +
+            "<b>Time Remaining: " + loadingSeconds + " sec</b>";
+
+        if (loadingSeconds <= 0) {
+
+            clearInterval(loadingTimer);
+
+            txt.innerHTML =
+                "Almost done...<br>Please wait a few more seconds.";
+
+        }
+
+    },1000);
+
+}
+
+function stopLoadingCountdown(){
+
+    if(loadingTimer){
+
+        clearInterval(loadingTimer);
+
+        loadingTimer = null;
+
+    }
+
+}
+
+
+
