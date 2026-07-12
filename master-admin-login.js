@@ -17,19 +17,14 @@
 // define window.APP_CONFIG instead.
 // ------------------------------------------------------------
 const MASTER_CONFIG = {
-SCRIPT_URL:
-(window.APP_CONFIG && window.APP_CONFIG.SCRIPT_URL)
-    ? window.APP_CONFIG.SCRIPT_URL
-    : "",
-
-  
+  SCRIPT_URL: APP_CONFIG.SCRIPT_URL,
   SESSION_MINUTES: 60,
   LS: {
     TOKEN: "ep_master_token",
     EXPIRY: "ep_master_expiry",
     REMEMBER: "ep_master_remember",
-    THEME: "ep_theme",
-  },
+    THEME: "ep_theme"
+  }
 };
 
 // ============================================================
