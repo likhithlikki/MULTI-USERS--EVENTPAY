@@ -27,6 +27,9 @@ const MASTER_CONFIG = {
   }
 };
 
+console.log("APP_CONFIG =", APP_CONFIG);
+console.log("SCRIPT_URL =", APP_CONFIG.SCRIPT_URL);
+console.log("MASTER_CONFIG =", MASTER_CONFIG);
 // ============================================================
 // STATE — single in-memory store for this page. Nothing here is
 // persisted except the auth token/expiry (and only if the backend
