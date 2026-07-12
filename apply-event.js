@@ -236,10 +236,7 @@
         showToast("Please paste your Google Spreadsheet link.");
         return;
       }
-      if (!formData.eventDate || !formData.eventTime || !formData.venue) {
-        showToast("Please fill in event date, time, and venue.");
-        return;
-      }
+     
 
       submitForm(formData);
     });
@@ -260,7 +257,7 @@
       expectedGuests: val("expectedGuests"),
       upiId: val("upiId"),
       description: val("description"),
-      spreadsheetLink: val("spreadsheetLink"),
+     
       confirmDuplicateOverride: state.duplicateAcknowledged
     };
 
