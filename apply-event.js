@@ -315,18 +315,29 @@
           return;
         }
 
-        setLoading(true, "Creating your event & spreadsheet…");
-      return runServer("submitEventApplication", formData)
-          setLoading(false);
-         console.log("submitEventApplication response:", res);
+     setLoading(true, "Creating your event & spreadsheet...");
 
-if (res.success) {
-    showResult(res);
-    goToStep(5);
-} else {
-    alert(JSON.stringify(res, null, 2));
-    showToast(res.message || "Something went wrong.");
-}
+return runServer("submitEventApplication", formData)
+.then(function (res) {
+
+    setLoading(false);
+
+    console.log("submitEventApplication response:", res);
+
+    if (res.success) {
+
+        showResult(res);
+        goToStep(5);
+
+    } else {
+
+        console.error("Submit Error:", res);
+        alert(JSON.stringify(res, null, 2));
+        showToast(res.message || "Something went wrong.");
+
+    }
+
+});
         });
       })
       .catch(function (err) {
