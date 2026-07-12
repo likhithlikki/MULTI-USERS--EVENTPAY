@@ -17,7 +17,12 @@
 // define window.APP_CONFIG instead.
 // ------------------------------------------------------------
 const MASTER_CONFIG = {
-SCRIPT_URL: (typeof APP_CONFIG !== "undefined" && APP_CONFIG.SCRIPT_URL) || "",
+SCRIPT_URL:
+(window.APP_CONFIG && window.APP_CONFIG.SCRIPT_URL)
+    ? window.APP_CONFIG.SCRIPT_URL
+    : "",
+
+  
   SESSION_MINUTES: 60,
   LS: {
     TOKEN: "ep_master_token",
