@@ -27,64 +27,111 @@ function getRootDriveFolderId_() {
   return id;
 }
 
+
+function getSheetsStorageFolderId_(){
+
+  const id = getProp_("SHEETS-STORAGE_FOLDER_ID");
+
+  if(!id)
+    throw new Error(
+      "SHEETS-STORAGE_FOLDER_ID is missing."
+    );
+
+  return id;
+
+}
+
 // ============================================================
 // 1. HTTP ENTRYPOINTS & ROUTER  (the ONLY doGet/doPost in the project)
 // ============================================================
-
 function doPost(e) {
-
-  if (!e) {
-    return out_({
-      success: false,
-      message: "Called from Editor",
-      hasEvent: false
-    });
-  }
-
-  return out_({
-    success: true,
-    message: "DOPOST TEST",
-    postData: e.postData.contents
-  });
-}
-
-
-
-function doPost(e) {
-
-  Logger.log("===== POST START =====");
-  Logger.log(e.postData.contents);
-
   try {
 
-    const p = Object.fromEntries(new URLSearchParams(e.postData.contents));
+    if (!e) {
+      return out_({
+        success: false,
+        error: "No request received"
+      });
+    }
 
-    Logger.log(JSON.stringify(p));
+    // Prefer Apps Script parsed parameters
+    let p = (e.parameter && Object.keys(e.parameter).length)
+      ? e.parameter
+      : {};
 
-    const result = handleAction(p.action, p, e.postData.contents);
+    // Fallback if parameter is empty
+    if (Object.keys(p).length === 0 && e.postData && e.postData.contents) {
+      p = {};
 
-    Logger.log("RESULT = " + JSON.stringify(result));
+      e.postData.contents.split("&").forEach(function(part) {
+        const kv = part.split("=");
+
+        const key = decodeURIComponent((kv[0] || "").replace(/\+/g, " "));
+        const value = decodeURIComponent((kv.slice(1).join("=") || "").replace(/\+/g, " "));
+
+        p[key] = value;
+      });
+    }
+
+    const result = handleAction(
+      p.action,
+      p,
+      e.postData ? e.postData.contents : null
+    );
 
     return out_(result);
 
-  } catch(err) {
+  } catch (err) {
 
-    Logger.log("POST ERROR = " + err);
+    Logger.log(err);
+    Logger.log(err.stack);
 
     return out_({
-      success:false,
-      error:String(err)
+      success: false,
+      error: err.toString()
+    });
+
+  }
+}
+
+
+
+function doGet(e) {
+
+  try {
+
+    const params = (e && e.parameter) ? e.parameter : {};
+    const action = params.action || "";
+
+    if (!action) {
+      return out_({
+        success: false,
+        error: "No action"
+      });
+    }
+
+    return out_(handleAction(action, params, null));
+
+  } catch (err) {
+
+    return out_({
+      success: false,
+      error: err.toString()
     });
 
   }
 
 }
 
+
+
+
+
 function out_(r) {
 
-  Logger.log("========== OUT ==========");
-  Logger.log(JSON.stringify(r));
-  Logger.log("=========================");
+  console.log("========== OUT ==========");
+  console.log(JSON.stringify(r));
+  console.log("=========================");
 
   return ContentService
       .createTextOutput(JSON.stringify(r))
@@ -92,20 +139,15 @@ function out_(r) {
 }
 
 function handleAction(action, p, pd) {
-  Logger.log("ENTER handleAction");
-Logger.log(action);
-  Logger.log("ACTION = " + action);
+  console.log("ENTER handleAction");
+console.log(action);
+  console.log("ACTION = " + action);
   try {
     switch (action) {
-      // ---- Public / Visitor (per-event, sid/eventCode optional) ----
-case "getSettings":
-  Logger.log("INSIDE getSettings ROUTER");
-case "getSettings":
-    return {
-        success: true,
-        sid:p.eventSid,
-        hello: "LIKITH"
-    };
+     
+      case "getSettings":
+      return getSettings(p);
+
       case "getPublicVisibility":   return getPublicVisibility(p);
       case "getPublicStats":        return getPublicStats(p);
       case "getPublicPayments":     return getPublicPayments(p);
@@ -150,10 +192,11 @@ case "getSettings":
       case "sendOrganizerOtp":       return sendOrganizerOtp(p.email);
       case "verifyOrganizerOtp":     return verifyOrganizerOtp(p.email, p.otp);
       case "checkDuplicateEvent":    return checkDuplicateEvent(p.organizerEmail, p.eventDate, p.eventName);
-      case "submitEventApplication": return submitEventApplicationAction(p);
+     case "submitEventApplication":
+    return submitEventApplication(p);
 
       case "getHomeBootstrap":
-      Logger.log("ENTER getHomeBootstrap");
+      console.log("ENTER getHomeBootstrap");
       return getHomeBootstrap(p);  
 
 
@@ -163,11 +206,22 @@ case "getSettings":
         return { error: "Unknown action: " + action, result: "Error", success: false };
     }
   } catch (err) {
-    return { error: err.message, result: "Error", success: false };
-  }
-  
-}
 
+    console.log("========== HANDLE ACTION ERROR ==========");
+    console.log(err.toString());
+    console.log(err.stack);
+    console.log("Action = " + action);
+    console.log("Params = " + JSON.stringify(p));
+    console.log("=========================================");
+
+    return {
+      success: false,
+      result: "Error",
+      error: err.toString(),
+      stack: err.stack
+    };
+  }
+}
 
 
 function getPublicVisibilityFromSettings_(s) {
@@ -313,7 +367,7 @@ function resolveSid_(p) {
 
   let resolved = DEFAULT_SPREADSHEET_ID;
 
-  Logger.log("SID = " + resolved);
+  console.log("SID = " + resolved);
 
   let via = "default";
 
@@ -331,7 +385,7 @@ function resolveSid_(p) {
   // DEBUG: trace exactly which spreadsheet each request resolves to.
   // View these in Apps Script → Executions while reproducing an issue.
   try {
-    Logger.log(
+    console.log(
       "resolveSid_ | action=%s | received sid=%s | received eventCode=%s | resolved via=%s | resolvedSpreadsheetId=%s",
       (p && p.action) || "(n/a)",
       (p && p.eventSid) || "(none)",
@@ -350,36 +404,106 @@ function resolveSid_(p) {
 // inline — functionally identical to this — and are left untouched.)
 function getCurrentSpreadsheet(p) {
   const sid = resolveSid_(p);
-  Logger.log("OPENING = " + sid);
+  console.log("OPENING = " + sid);
 
   const ss = SpreadsheetApp.openById(sid);
-  Logger.log("OPENED = " + ss.getName());
+  console.log("OPENED = " + ss.getName());
 
   try {
-    Logger.log("getCurrentSpreadsheet | Opened spreadsheet id=%s | name=%s", sid, ss.getName());
+    console.log("getCurrentSpreadsheet | Opened spreadsheet id=%s | name=%s", sid, ss.getName());
   } catch (e) {}
   return ss;
 }
 
 const EVENTS_SHEET_HEADERS = [
-  "EventID", "EventCode", "EventType", "EventName", "SpreadsheetID", "SpreadsheetLink",
-  "OrganizerName", "OrganizerPhone", "OrganizerEmail", "Plan", "TrialExpiry", "Status",
-  "SettlementStatus", "CreatedDate", "UpdatedDate", "AdminUsername", "AdminPassword",
-  "PublicURL", "AdminURL"
+  "EventID",
+  "EventCode",
+  "EventType",
+  "EventName",
+  "SpreadsheetID",
+  "SpreadsheetLink",
+  "OrganizerName",
+  "OrganizerPhone",
+  "OrganizerEmail",
+  "Plan",
+  "TrialExpiry",
+  "Status",
+  "SettlementStatus",
+  "CreatedDate",
+  "UpdatedDate",
+  "AdminUsername",
+  "AdminPassword",
+  "PublicURL",
+  "AdminURL",
+
+  "EventFolderLink",
+  "ComplaintFolderLink",
+  "BirthdayGalleryLink",
+  "HaldiGalleryLink",
+  "MarriageGalleryLink",
+  "ReceptionGalleryLink",
+  "OtherGalleryLink"
 ];
 
 function getOrCreateEventsSheet_() {
+
   const ss = SpreadsheetApp.openById(getMasterDbId_());
-  Logger.log("OPENED = " + ss.getName());
+  console.log("OPENED = " + ss.getName());
+
   let sheet = ss.getSheetByName("Events");
+
   if (!sheet) {
+
     sheet = ss.insertSheet("Events");
-    sheet.getRange(1, 1, 1, EVENTS_SHEET_HEADERS.length).setValues([EVENTS_SHEET_HEADERS]);
+
+    sheet.getRange(1, 1, 1, EVENTS_SHEET_HEADERS.length)
+         .setValues([EVENTS_SHEET_HEADERS]);
+
     sheet.setFrozenRows(1);
-    sheet.getRange(1, 1, 1, EVENTS_SHEET_HEADERS.length).setFontWeight("bold");
+
+    sheet.getRange(1, 1, 1, EVENTS_SHEET_HEADERS.length)
+         .setFontWeight("bold");
+
+  } else {
+
+    ensureEventsSheetHeaders_(sheet);
+
   }
+
   return sheet;
 }
+
+function ensureEventsSheetHeaders_(sheet) {
+
+  try {
+
+    const lastCol = Math.max(sheet.getLastColumn(), 1);
+
+    const existing = sheet
+      .getRange(1, 1, 1, lastCol)
+      .getValues()[0]
+      .map(h => String(h).trim());
+
+    const missing = EVENTS_SHEET_HEADERS.filter(h => existing.indexOf(h) === -1);
+
+    if (missing.length) {
+
+      sheet
+        .getRange(1, lastCol + 1, 1, missing.length)
+        .setValues([missing]);
+
+      sheet
+        .getRange(1, lastCol + 1, 1, missing.length)
+        .setFontWeight("bold");
+
+    }
+
+  } catch (e) {
+    console.log(e);
+  }
+
+}
+
 
 function lookupSpreadsheetIdByCode_(eventCode) {
   try {
@@ -452,7 +576,7 @@ function searchEvent(p) {
 
 function createEventSpreadsheetAction(p) {
 
-const lock = LockService.getDocumentLock();
+const lock = LockService.getScriptLock()  ;
 lock.waitLock(30000);
 
 try {
@@ -515,7 +639,7 @@ function updateSettings(p) {
 
 
 
-const lock = LockService.getDocumentLock();
+const lock =LockService.getScriptLock()  ;
 lock.waitLock(30000);
 
 try {
@@ -558,7 +682,7 @@ finally{
 function loginAdmin(p) {
   const sid = resolveSid_(p);
   const ss = SpreadsheetApp.openById(sid);
-  Logger.log("OPENED = " + ss.getName());
+  console.log("OPENED = " + ss.getName());
   const sheet = ss.getSheetByName("Admins");
   let matchedRow = null, adminsData = null;
 
@@ -632,7 +756,7 @@ function isUTRBlacklisted(utr, p) {
 
 function addUTRBlacklist(p) {
 
-const lock = LockService.getDocumentLock();
+const lock = LockService.getScriptLock()  ;
 lock.waitLock(30000);
 
 try {
@@ -727,32 +851,32 @@ function validateUTR(p) {
 function insertPayment(p) {
 
 
-Logger.log("STEP 1");
+console.log("STEP 1");
 
-const lock = LockService.getDocumentLock();
-Logger.log("STEP 2");
+const lock = LockService.getScriptLock();
+console.log("STEP 2");
 lock.waitLock(30000);
 
-Logger.log("STEP 3");
-Logger.log("eventSid = " + p.eventSid);
+console.log("STEP 3");
+console.log("eventSid = " + p.eventSid);
 const ss = getCurrentSpreadsheet(p);
 
-Logger.log("STEP 4");
-Logger.log(ss.getId());
+console.log("STEP 4");
+console.log(ss.getId());
 
 const sheet = ss.getSheetByName("Payments");
-Logger.log("STEP 5");
+console.log("STEP 5");
 
 try {
 
 
 
 
-  Logger.log("insertPayment sid = " + p.eventSid);
+  console.log("insertPayment sid = " + p.eventSid);
   const ss = getCurrentSpreadsheet(p);
-  Logger.log("Spreadsheet = " + ss.getName());
+  console.log("Spreadsheet = " + ss.getName());
   const sheet = ss.getSheetByName("Payments");
-  Logger.log("Sheet = " + sheet.getName());
+  console.log("Sheet = " + sheet.getName());
 
   if (!sheet) return { result: "Error", message: "Payments sheet not found" };
   const data = sheet.getDataRange().getValues();
@@ -885,26 +1009,26 @@ function getRecentTransactions(p) {
 
 function getHomeBootstrap(p) {
 
-  Logger.log("START getHomeBootstrap");
+  console.log("START getHomeBootstrap");
 
   try {
 
-    Logger.log("Loading Settings");
+    console.log("Loading Settings");
     const settings = getSettings(p);
 
-    Logger.log("Loading Visibility");
+    console.log("Loading Visibility");
     const visibility = getPublicVisibilityFromSettings_(settings);
 
-    Logger.log("Loading Stats");
+    console.log("Loading Stats");
     const stats = getPublicStats(p);
 
-    Logger.log("Loading Villages");
+    console.log("Loading Villages");
     const villages = getVillageSuggestions(p);
 
-    Logger.log("Loading Transactions");
+    console.log("Loading Transactions");
     const recent = getRecentTransactions(p);
 
-    Logger.log("SUCCESS");
+    console.log("SUCCESS");
 
     return {
       settings,
@@ -916,8 +1040,8 @@ function getHomeBootstrap(p) {
 
   } catch (e) {
 
-    Logger.log("ERROR: " + e);
-    Logger.log(e.stack);
+    console.log("ERROR: " + e);
+    console.log(e.stack);
 
     return {
       error: e.toString(),
@@ -988,7 +1112,7 @@ function getPayments(p) {
 function updatePayments(p) {
 
 
-  const lock = LockService.getDocumentLock();
+  const lock = LockService.getScriptLock()  ;
 lock.waitLock(30000);
 
 try {
@@ -1065,18 +1189,25 @@ function getPublicPayments(p) {
 function insertComplaint(p) {
 
 
-const lock = LockService.getDocumentLock();
+const lock = LockService.getScriptLock()   ;
 lock.waitLock(30000);
 
 try {
+  console.log("===== INSERT COMPLAINT =====");
+console.log(JSON.stringify(p));
 
  const ss = getCurrentSpreadsheet(p);
+ console.log("Spreadsheet = " + ss.getName());
+
   const sheet = ss.getSheetByName("Complaints");
+  console.log("Sheet = " + (sheet ? sheet.getName() : "NULL"));
+
   if (!sheet) return { result: "Error", message: "Complaints sheet not found" };
   const n = nowFormatted();
   let fileUrl = "", fileStatus = "None";
 
   if (p.filedata && p.filename) {
+    console.log("Uploading attachment...");
     try {
       const s = getSettings(p);
       const folderID = extractFolderID(s.COMPLAINT_UPLOAD_FOLDER_ID);
@@ -1086,14 +1217,16 @@ try {
         const decoded = Utilities.base64Decode(cleanBase64);
         const blob = Utilities.newBlob(decoded, p.filetype || "application/octet-stream", p.filename);
         const file = folder.createFile(blob);
+        console.log("File uploaded = " + file.getId());
+        
         file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
         fileUrl = "https://drive.google.com/file/d/" + file.getId() + "/view";
         fileStatus = "Attached";
       }
-    } catch (e) {
-      fileUrl = "Error: " + e.message;
-      fileStatus = "Error";
-    }
+    }catch (e) {
+  console.log("UPLOAD ERROR = " + e);
+  throw e;
+}
   }
 
   const cID = "CP" + Date.now().toString().slice(-8);
@@ -1145,7 +1278,7 @@ function getComplaints(p) {
 function updateComplaint(p) {
 
 
-const lock = LockService.getDocumentLock();
+const lock = LockService.getScriptLock()   ;
 lock.waitLock(30000);
 
 try {
@@ -1212,7 +1345,7 @@ function getVillageSuggestions(p) {
 function addVillageSuggestion(p) {
 
 
-const lock = LockService.getDocumentLock();
+const lock =LockService.getScriptLock()   ;
 lock.waitLock(30000);
 
 try {
@@ -1398,7 +1531,7 @@ function getAuditLog(p) {
 function undoActions(p) {
 
 
-  const lock = LockService.getDocumentLock();
+  const lock = LockService.getScriptLock()  ;
 lock.waitLock(30000);
 
 try {
@@ -1489,7 +1622,7 @@ function getSheetData(p) {
 function updateSheetCell(p) {
 
 
-  const lock = LockService.getDocumentLock();
+  const lock = LockService.getScriptLock();
 lock.waitLock(30000);
 
 try {
@@ -1522,7 +1655,7 @@ finally{
 function addSheetRow(p) {
   
 
-const lock = LockService.getDocumentLock();
+const lock =LockService.getScriptLock()  ;
 lock.waitLock(30000);
 
 try {
@@ -1553,7 +1686,7 @@ finally{
 
 function deleteSheetRow(p) {
 
-  const lock = LockService.getDocumentLock();
+  const lock = LockService.getScriptLock()  ;
   lock.waitLock(30000);
 
   try {
@@ -1671,47 +1804,43 @@ function formatDateOnly_(value) {
   return Utilities.formatDate(d, Session.getScriptTimeZone() || "Asia/Kolkata", "dd-MMM-yyyy");
 }
 
-function submitEventApplicationAction(p) {
-
-
-
-  let formData;
-  try { formData = JSON.parse(p.formData || "{}"); }
-  catch (err) { return { success: false, message: "Malformed form data." }; }
-  // Defense-in-depth: strip any stray "+"/percent-encoding from every text field.
-  Object.keys(formData).forEach(k => { if (typeof formData[k] === "string") formData[k] = cleanText_(formData[k]); });
-  return submitEventApplication(formData);
-}
-
 function submitEventApplication(formData) {
+
+  const eventId = getNextEventId_();
+  const eventCode = generateEventCode_(formData.eventType);
+  const eventName = cleanText_(formData.autoEventName || buildEventName_(formData));
+
   try {
+
     const cache = CacheService.getScriptCache();
     if (!cache.get("OTP_VERIFIED_" + formData.organizerEmail)) {
       return { success: false, message: "Email not verified. Please verify OTP first." };
     }
 
-    const spreadsheetId = extractSpreadsheetId_(formData.spreadsheetLink);
-    if (!spreadsheetId) return { success: false, message: "Could not read a valid Google Sheets link." };
+    // ---- NEW: read global config from Master DB before any writes ----
+    const globalSettings = readGlobalSettings_();
+    const globalPayments = getMasterPaymentSettings_(); // available if plan pricing is needed downstream
 
-    let targetSs;
-    try { targetSs = SpreadsheetApp.openById(spreadsheetId); 
-    Logger.log(targetSs.getName()); }
-
-    catch (err) { return { success: false, message: "Spreadsheet not accessible. Check sharing permissions and the link." }; }
+    const createdSpreadsheet = createEventSpreadsheet_(eventCode);
+    const spreadsheetId = createdSpreadsheet.spreadsheetId;
+    const spreadsheetLink = createdSpreadsheet.spreadsheetUrl;
 
     const dup = checkDuplicateEvent(formData.organizerEmail, formData.eventDate, formData.autoEventName);
-    if (dup.duplicate && !formData.confirmDuplicateOverride) return { success: false, duplicate: true, message: dup.message };
+    if (dup.duplicate && !formData.confirmDuplicateOverride) {
+      return { success: false, duplicate: true, message: dup.message };
+    }
 
     if (formData.plan === "Free" && hasClaimedFreeTrial_(formData.organizerEmail)) {
       return { success: false, message: "This email has already used its free trial." };
     }
 
-    const eventId = getNextEventId_();
-    const eventCode = generateEventCode_(formData.eventType);
-    const eventName = cleanText_(formData.autoEventName || buildEventName_(formData));
-
     const initResult = initializeEventSpreadsheet(spreadsheetId);
-    if (!initResult || !initResult.success) return { success: false, message: "Failed to initialize spreadsheet." };
+    if (!initResult || !initResult.success) {
+      return { success: false, message: "Failed to initialize spreadsheet." };
+    }
+
+    const targetSs = SpreadsheetApp.openById(spreadsheetId);
+    moveSpreadsheetToStorageFolder_(spreadsheetId);
 
     const folderResult = createEventDriveFolders_(eventId, eventCode, eventName, formData.eventType);
     writeEventSettings_(targetSs, formData, folderResult.settingsUpdates, eventName);
@@ -1731,39 +1860,100 @@ function submitEventApplication(formData) {
     }
 
     const createdDate = formatReadableDate_(new Date());
+    const eventFolderLink = folderResult.parentFolderId
+      ? "https://drive.google.com/drive/folders/" + folderResult.parentFolderId
+      : "";
+
     insertEventRow_({
       EventID: eventId, EventCode: eventCode, EventType: formData.eventType, EventName: eventName,
-      SpreadsheetID: spreadsheetId, SpreadsheetLink: formData.spreadsheetLink,
+      SpreadsheetID: spreadsheetId, SpreadsheetLink: spreadsheetLink,
       OrganizerName: formData.organizerName, OrganizerPhone: formData.organizerPhone, OrganizerEmail: formData.organizerEmail,
       Plan: formData.plan, TrialExpiry: trialExpiry,
       Status: "Active", SettlementStatus: "Pending",
       CreatedDate: createdDate, UpdatedDate: createdDate,
-      AdminUsername: adminUsername, AdminPassword: adminPassword, PublicURL: publicURL, AdminURL: adminURL
+      AdminUsername: adminUsername, AdminPassword: adminPassword,
+      PublicURL: publicURL, AdminURL: adminURL,
+      EventFolderLink: eventFolderLink,
+      ComplaintFolderLink: folderResult.settingsUpdates["COMPLAINT_UPLOAD_FOLDER_ID"]
+        ? "https://drive.google.com/drive/folders/" + folderResult.settingsUpdates["COMPLAINT_UPLOAD_FOLDER_ID"] : "",
+      BirthdayGalleryLink: folderResult.settingsUpdates["BIRTHDAY_GALLERY_FOLDER_ID"]
+        ? "https://drive.google.com/drive/folders/" + folderResult.settingsUpdates["BIRTHDAY_GALLERY_FOLDER_ID"] : "",
+      HaldiGalleryLink: folderResult.settingsUpdates["HALDI_GALLERY_FOLDER_ID"]
+        ? "https://drive.google.com/drive/folders/" + folderResult.settingsUpdates["HALDI_GALLERY_FOLDER_ID"] : "",
+      MarriageGalleryLink: folderResult.settingsUpdates["MARRIAGE_GALLERY_FOLDER_ID"]
+        ? "https://drive.google.com/drive/folders/" + folderResult.settingsUpdates["MARRIAGE_GALLERY_FOLDER_ID"] : "",
+      ReceptionGalleryLink: folderResult.settingsUpdates["RECEPTION_GALLERY_FOLDER_ID"]
+        ? "https://drive.google.com/drive/folders/" + folderResult.settingsUpdates["RECEPTION_GALLERY_FOLDER_ID"] : "",
+      OtherGalleryLink: folderResult.settingsUpdates["OTHER_GALLERY_FOLDER_ID"]
+        ? "https://drive.google.com/drive/folders/" + folderResult.settingsUpdates["OTHER_GALLERY_FOLDER_ID"] : ""
     });
 
-    logAudit_({ action: "Created Event", organizerEmail: formData.organizerEmail, spreadsheetId: spreadsheetId, eventCode: eventCode, plan: formData.plan });
+    logAudit_({
+      action: "Created Event", organizerEmail: formData.organizerEmail,
+      spreadsheetId: spreadsheetId, eventCode: eventCode, plan: formData.plan
+    });
 
+    // ---- MODIFIED: gated by globalSettings, not hardcoded ----
     try {
-      sendEventCreatedEmail_(formData.organizerEmail, {
-        eventName: eventName, eventId: eventId, eventCode: eventCode, eventType: formData.eventType,
-        organizerName: formData.organizerName, organizerPhone: formData.organizerPhone, organizerEmail: formData.organizerEmail,
-        spreadsheetLink: formData.spreadsheetLink, spreadsheetId: spreadsheetId,
-        publicURL: publicURL, adminURL: adminURL, adminUsername: adminUsername, adminPassword: adminPassword,
-        plan: formData.plan, trialExpiry: trialExpiry, createdDate: createdDate, status: "Active"
-      });
+      if (String(globalSettings["Send Event Created Email"] || "TRUE").toUpperCase().trim() === "TRUE") {
+        sendEventCreatedEmail_(formData.organizerEmail, {
+          eventName: eventName, eventId: eventId, eventCode: eventCode, eventType: formData.eventType,
+          organizerName: formData.organizerName, organizerPhone: formData.organizerPhone, organizerEmail: formData.organizerEmail,
+          spreadsheetLink: spreadsheetLink, spreadsheetId: spreadsheetId,
+          publicURL: publicURL, adminURL: adminURL, eventFolderLink: eventFolderLink,
+          adminUsername: adminUsername, adminPassword: adminPassword,
+          plan: formData.plan, trialExpiry: trialExpiry, createdDate: createdDate, status: "Active"
+        }, globalSettings);
+      }
     } catch (mailErr) {}
 
     cache.remove("OTP_VERIFIED_" + formData.organizerEmail);
 
     return {
       success: true, eventId: eventId, eventCode: eventCode, eventName: eventName,
-      spreadsheetLink: formData.spreadsheetLink, publicURL: publicURL, adminURL: adminURL,
+      SpreadsheetLink: spreadsheetLink, publicURL: publicURL, adminURL: adminURL,
       adminUsername: adminUsername, adminPassword: adminPassword
     };
+
   } catch (err) {
     return { success: false, message: "Unexpected error: " + err.message };
   }
 }
+
+
+
+function createEventSpreadsheet_(eventCode){
+
+  const ss = SpreadsheetApp.create("EventPay - " + eventCode);
+
+  return{
+    spreadsheetId:ss.getId(),
+    spreadsheetUrl:ss.getUrl(),
+    ss:ss
+  };
+
+}
+
+function moveSpreadsheetToStorageFolder_(spreadsheetId) {
+
+  const folder = DriveApp.getFolderById(getSheetsStorageFolderId_());
+  const file = DriveApp.getFileById(spreadsheetId);
+
+  try {
+    folder.addFile(file);
+    DriveApp.getRootFolder().removeFile(file);
+    console.log("Spreadsheet moved successfully.");
+  } catch (e) {
+    console.log("Failed to move spreadsheet: " + e);
+  }
+
+}
+
+
+
+
+
+
 
 function getNextEventId_() {
   const sheet = getOrCreateEventsSheet_();
@@ -1845,8 +2035,10 @@ function getOrCreateChildFolder_(parentFolder, name) {
 }
 
 function writeEventSettings_(targetSs, formData, folderSettings, cleanEventName) {
+
   const settingsSheet = targetSs.getSheetByName("Settings");
   if (!settingsSheet) return;
+
   const updates = {
     "Event Name": cleanEventName, "EventDate": formData.eventDate, "EventTime": formData.eventTime,
     "VenueAddress": cleanText_(formData.venue), "VenueMapLink": formData.mapsLink, "UPI_ID": formData.upiId,
@@ -1874,6 +2066,9 @@ function writeEventSettings_(targetSs, formData, folderSettings, cleanEventName)
   if (appendRows.length > 0) settingsSheet.getRange(settingsSheet.getLastRow() + 1, 1, appendRows.length, 2).setValues(appendRows);
 }
 
+
+
+
 function writeAdminAccount_(targetSs, username, password, email) {
   const adminsSheet = targetSs.getSheetByName("Admins");
   if (!adminsSheet) return;
@@ -1882,7 +2077,7 @@ function writeAdminAccount_(targetSs, username, password, email) {
 
 function logAudit_(entry) {
   const masterSs = SpreadsheetApp.openById(getMasterDbId_());
- Logger.log(masterSs.getName());;
+ console.log(masterSs.getName());;
   let sheet = masterSs.getSheetByName("AuditLog");
   if (!sheet) {
     sheet = masterSs.insertSheet("AuditLog");
@@ -1899,10 +2094,173 @@ function generateSecurePassword_(length) {
   return password;
 }
 
+
+function ensureMasterSettingsSheet_() {
+
+  const ss = SpreadsheetApp.openById(getMasterDbId_());
+  let sheet = ss.getSheetByName("Settings");
+
+  const defaults = [
+    ["Send Event Created Email", "TRUE"],
+    ["Send Spreadsheet Link", "TRUE"],
+    ["Send Spreadsheet ID", "TRUE"],
+    ["Send Parent Event Folder Link", "TRUE"],
+    ["Send Organizer Details", "TRUE"],
+    ["Send Admin Credentials", "TRUE"],
+    ["Send Public URL", "TRUE"],
+    ["Send Admin URL", "TRUE"],
+    ["Send Subscription Details", "TRUE"],
+    ["Send Plan Details", "TRUE"],
+    ["Allow Gallery Folder Links", "TRUE"],
+    ["Allow Password Reset", "TRUE"],
+    ["Password Reset Expiry (Minutes)", 30],
+    ["Send Password Reset Email", "TRUE"]
+  ];
+
+  if (!sheet) {
+    sheet = ss.insertSheet("Settings");
+    sheet.getRange(1, 1, 1, 2).setValues([["Setting", "Value"]]).setFontWeight("bold");
+    sheet.getRange(2, 1, defaults.length, 2).setValues(defaults);
+    sheet.setFrozenRows(1);
+    return;
+  }
+
+  const lastRow = sheet.getLastRow();
+  const existingKeys = {};
+  if (lastRow > 1) {
+    sheet.getRange(2, 1, lastRow - 1, 1).getValues().forEach(r => {
+      const k = String(r[0]).trim();
+      if (k) existingKeys[k] = true;
+    });
+  }
+
+  const missing = defaults.filter(pair => !existingKeys[pair[0]]);
+  if (missing.length > 0) {
+    sheet.getRange(Math.max(lastRow + 1, 2), 1, missing.length, 2).setValues(missing);
+  }
+}
+
+
+/**
+ * Reads the MASTER DB's Settings sheet (global, org-wide flags only —
+ * e.g. SEND_SPREADSHEET_LINK, SEND_ADMIN_CREDENTIALS). Ensures the sheet
+ * exists first. Never touches any event spreadsheet.
+ * @return {Object} key -> value map
+ */
+function readGlobalSettings_() {
+  ensureMasterSettingsSheet_();
+  const ss = SpreadsheetApp.openById(getMasterDbId_());
+  const sheet = ss.getSheetByName("Settings");
+  if (!sheet) return {};
+  const data = sheet.getDataRange().getValues();
+  const obj = {};
+  for (let i = 1; i < data.length; i++) {
+    const key = String(data[i][0] || "").trim();
+    if (key) obj[key] = data[i][1];
+  }
+  return obj;
+}
+
+
+
+/**
+ * Idempotent creator for the MASTER DB's global Payments sheet
+ * (plan pricing / gateway config only — never per-event payment data).
+ * Safe to call repeatedly: only creates what's missing, never
+ * duplicates rows or overwrites an existing value.
+ */
+function ensureMasterPaymentsSheet_() {
+  const ss = SpreadsheetApp.openById(getMasterDbId_());
+  let sheet = ss.getSheetByName("Payments");
+
+  const defaults = [
+    ["Payment Gateway Enabled", "FALSE"],
+    ["Gateway Name", ""],
+    ["Basic Plan Price", 0],
+    ["Premium Plan Price", 0],
+    ["Enterprise Plan Price", 0]
+  ];
+
+  if (!sheet) {
+    sheet = ss.insertSheet("Payments");
+    sheet.getRange(1, 1, 1, 2).setValues([["Setting", "Value"]]).setFontWeight("bold");
+    sheet.getRange(2, 1, defaults.length, 2).setValues(defaults);
+    sheet.setFrozenRows(1);
+    return;
+  }
+
+  const lastRow = sheet.getLastRow();
+  const existingKeys = {};
+  if (lastRow > 1) {
+    sheet.getRange(2, 1, lastRow - 1, 1).getValues().forEach(r => {
+      const k = String(r[0]).trim();
+      if (k) existingKeys[k] = true;
+    });
+  }
+
+  const missing = defaults.filter(pair => !existingKeys[pair[0]]);
+  if (missing.length > 0) {
+    sheet.getRange(Math.max(lastRow + 1, 2), 1, missing.length, 2).setValues(missing);
+  }
+}
+
+
+
+/**
+ * Reads the MASTER DB's Payments sheet (global plan/gateway config only).
+ * Ensures the sheet exists first. Never touches any event spreadsheet.
+ * @return {Object} key -> value map
+ */
+function getMasterPaymentSettings_() {
+  ensureMasterPaymentsSheet_();
+  const ss = SpreadsheetApp.openById(getMasterDbId_());
+  const sheet = ss.getSheetByName("Payments");
+  if (!sheet) return {};
+  const data = sheet.getDataRange().getValues();
+  const obj = {};
+  for (let i = 1; i < data.length; i++) {
+    const key = String(data[i][0] || "").trim();
+    if (key) obj[key] = data[i][1];
+  }
+  return obj;
+}
+
+
+
+
 // Professional HTML confirmation email (requirement #19).
-function sendEventCreatedEmail_(to, d) {
+function sendEventCreatedEmail_(to, d, globalSettings) {
+  const g = globalSettings || {};
+  const isOn = (key) => String(g[key] || "TRUE").toUpperCase().trim() === "TRUE";
+
   const btn = (label, url) => `<a href="${url}" style="display:inline-block;padding:12px 22px;margin:6px 8px 0 0;background:#6366f1;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;font-family:Arial,sans-serif;font-size:14px;">${label}</a>`;
   const row = (label, value) => `<tr><td style="padding:6px 12px;color:#6b7280;font-size:13px;font-family:Arial,sans-serif;white-space:nowrap;">${label}</td><td style="padding:6px 12px;color:#111827;font-size:13px;font-family:Arial,sans-serif;font-weight:600;">${value}</td></tr>`;
+
+  let rows = "";
+  rows += row("Event Name", d.eventName);
+  rows += row("Event Code", d.eventCode);
+  rows += row("Event ID", d.eventId);
+  rows += row("Event Type", d.eventType || "");
+  if (isOn("Send Organizer Details")) {
+    rows += row("Organizer", d.organizerName || "");
+    rows += row("Organizer Phone", d.organizerPhone || "");
+    rows += row("Organizer Email", d.organizerEmail || "");
+  }
+  if (isOn("Send Plan Details")) rows += row("Plan", d.plan + (d.trialExpiry ? " (trial expires " + d.trialExpiry + ")" : ""));
+  if (isOn("Send Spreadsheet ID")) rows += row("Spreadsheet ID", d.spreadsheetId || "");
+  rows += row("Created", d.createdDate || "");
+  rows += row("Status", d.status || "Active");
+  if (isOn("Send Admin Credentials")) {
+    rows += row("Admin Username", d.adminUsername);
+    rows += row("Admin Password", d.adminPassword);
+  }
+
+  let buttons = "";
+  if (isOn("Send Public URL")) buttons += btn("Open Public Event", d.publicURL);
+  if (isOn("Send Admin URL")) buttons += btn("Open Admin Panel", d.adminURL);
+  if (isOn("Send Spreadsheet Link")) buttons += btn("Open Spreadsheet", d.spreadsheetLink);
+  if (isOn("Send Parent Event Folder Link") && d.eventFolderLink) buttons += btn("Open Event Folder", d.eventFolderLink);
+
   const html = `
   <div style="max-width:600px;margin:0 auto;font-family:Arial,sans-serif;background:#f9fafb;padding:24px;">
     <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:14px 14px 0 0;padding:28px;text-align:center;">
@@ -1911,30 +2269,22 @@ function sendEventCreatedEmail_(to, d) {
     <div style="background:#ffffff;border-radius:0 0 14px 14px;padding:24px;border:1px solid #e5e7eb;border-top:none;">
       <p style="color:#374151;font-size:14px;">Hi ${d.organizerName || "there"}, your event is ready to go. Keep this email safe — it contains your admin login.</p>
       <table style="width:100%;border-collapse:collapse;margin:16px 0;background:#f9fafb;border-radius:10px;overflow:hidden;">
-        ${row("Event Name", d.eventName)}
-        ${row("Event Code", d.eventCode)}
-        ${row("Event ID", d.eventId)}
-        ${row("Event Type", d.eventType || "")}
-        ${row("Organizer", d.organizerName || "")}
-        ${row("Organizer Phone", d.organizerPhone || "")}
-        ${row("Organizer Email", d.organizerEmail || "")}
-        ${row("Plan", d.plan + (d.trialExpiry ? " (trial expires " + d.trialExpiry + ")" : ""))}
-        ${row("Spreadsheet ID", d.spreadsheetId || "")}
-        ${row("Created", d.createdDate || "")}
-        ${row("Status", d.status || "Active")}
-        ${row("Admin Username", d.adminUsername)}
-        ${row("Admin Password", d.adminPassword)}
+        ${rows}
       </table>
-      <p style="color:#b91c1c;font-size:12px;">Please log in and change this password as soon as possible.</p>
+      ${isOn("Send Admin Credentials") ? '<p style="color:#b91c1c;font-size:12px;">Please log in and change this password as soon as possible.</p>' : ""}
       <div style="margin-top:12px;">
-        ${btn("Open Public Event", d.publicURL)}
-        ${btn("Open Admin Panel", d.adminURL)}
-        ${btn("Open Spreadsheet", d.spreadsheetLink)}
+        ${buttons}
       </div>
       <p style="color:#9ca3af;font-size:11px;margin-top:24px;">Support: reply to this email if you need help setting anything up.</p>
     </div>
   </div>`;
-  const plain = "Your event has been created.\nEvent: " + d.eventName + " (" + d.eventCode + ")\nAdmin: " + d.adminUsername + " / " + d.adminPassword +
-    "\nPublic: " + d.publicURL + "\nAdmin: " + d.adminURL;
+
+  const plain = "Your event has been created.\nEvent: " + d.eventName + " (" + d.eventCode + ")" +
+    (isOn("Send Admin Credentials") ? "\nAdmin: " + d.adminUsername + " / " + d.adminPassword : "") +
+    (isOn("Send Public URL") ? "\nPublic: " + d.publicURL : "") +
+    (isOn("Send Admin URL") ? "\nAdmin: " + d.adminURL : "");
+
   MailApp.sendEmail({ to: to, subject: "🎉 Your EventPay Event Has Been Created Successfully — " + d.eventCode, body: plain, htmlBody: html });
 }
+
+
