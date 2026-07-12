@@ -316,7 +316,7 @@
         }
 
         setLoading(true, "Creating your event & spreadsheet…");
-        return runServer("submitEventApplication", { formData: JSON.stringify(formData) }).then(function (res) {
+      return runServer("submitEventApplication", formData)
           setLoading(false);
          console.log("submitEventApplication response:", res);
 
