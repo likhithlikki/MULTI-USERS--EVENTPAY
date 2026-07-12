@@ -47,18 +47,37 @@ const state = {
 };
 
 // ============================================================
-// GENERIC API HELPER (placeholder)
-// Every real backend call in this file funnels through here so
-// swapping in the real Apps Script endpoint is a one-function change.
+// GENERIC API HELPER
+// Every backend call funnels through here. Talks to the Apps Script
+// Web App deployed from master-admin-backend.gs. The session token
+// (from masterLogin) is attached to every call automatically except
+// masterLogin itself.
 // ============================================================
 async function masterApi(action, params = {}, method = "GET") {
-  // TODO(backend): point this at the Master Admin Apps Script Web App.
-  // Example:
-  //   const url = new URL(MASTER_CONFIG.SCRIPT_URL);
-  //   url.searchParams.set("action", action);
-  //   ... fetch, parse JSON, return
-  console.log(`[masterApi placeholder] action="${action}"`, params, method);
-  return { success: false, placeholder: true, action, params };
+  if (!MASTER_CONFIG.SCRIPT_URL) {
+    console.warn(`[masterApi] SCRIPT_URL not configured — action "${action}" skipped.`);
+    return { success: false, error: "Backend not connected yet." };
+  }
+
+  const token = action === "masterLogin" ? null : localStorage.getItem(MASTER_CONFIG.LS.TOKEN);
+  const fullParams = token ? { ...params, token } : params;
+
+  try {
+    if (method === "GET") {
+      const url = new URL(MASTER_CONFIG.SCRIPT_URL);
+      url.searchParams.set("action", action);
+      Object.entries(fullParams).forEach(([k, v]) => url.searchParams.set(k, String(v)));
+      const res = await fetch(url.toString());
+      return await res.json();
+    } else {
+      const body = new URLSearchParams({ action, ...fullParams });
+      const res = await fetch(MASTER_CONFIG.SCRIPT_URL, { method: "POST", body });
+      const text = await res.text();
+      try { return JSON.parse(text); } catch (e) { return { success: false, error: "Invalid response from server", raw: text }; }
+    }
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 }
 
 // ============================================================
@@ -189,16 +208,19 @@ function setLoginLoading(loading) {
   btn.disabled = loading;
 }
 
-// Placeholder auth call — checks the single MASTER-ADMIN-PASS property
-// on the backend. Wire this to an Apps Script action, e.g.
-// masterApi("masterLogin", { password }, "POST").
+// Checks the single MASTER-ADMIN-PASS property on the backend via the
+// masterLogin action and stores the returned session token.
 async function loginMasterAdmin(password, remember) {
-  // TODO(backend): replace with a real call, e.g.:
-  // const res = await masterApi("masterLogin", { password }, "POST");
-  // if (res.success) { store token/expiry; return { success: true }; }
-  // return { success: false, error: res.error || "Incorrect master password." };
-  console.log("[loginMasterAdmin placeholder] password length:", password.length, "remember:", remember);
-  return { success: false, error: "Backend not connected yet — this is a frontend-only preview." };
+  const res = await masterApi("masterLogin", { password }, "POST");
+  if (!res.success) {
+    return { success: false, error: res.error || "Incorrect master password." };
+  }
+
+  const expiry = Date.now() + (res.expiresInSeconds || MASTER_CONFIG.SESSION_MINUTES * 60) * 1000;
+  localStorage.setItem(MASTER_CONFIG.LS.TOKEN, res.token);
+  localStorage.setItem(MASTER_CONFIG.LS.EXPIRY, String(expiry));
+  localStorage.setItem(MASTER_CONFIG.LS.REMEMBER, remember ? "1" : "0");
+  return { success: true };
 }
 
 function hasValidSession() {
