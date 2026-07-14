@@ -557,4 +557,104 @@ function stopLoadingCountdown(){
 }
 
 
+// --- ADD near top, after DYNAMIC_FIELDS ---
+var PLAN_PRICES = { "Free": 0, "Premium": 1499, "Enterprise": 4999 };
+
+// --- ADD to init() ---
+function init() {
+  bindNav();
+  bindOtp();
+  bindEventTypeChange();
+  bindSubmit();
+  bindResultButtons();
+  handlePaymentReturn();   // NEW: resume flow after returning from payment.html
+  goToStep(1);
+}
+
+// --- REPLACE bindSubmit()'s submit listener body ---
+function bindSubmit() {
+  document.getElementById("applyForm").addEventListener("submit", function (e) {
+    e.preventDefault();
+
+    if (!document.getElementById("termsCheck").checked ||
+        !document.getElementById("privacyCheck").checked) {
+      showToast("Please accept both Terms & Conditions and Privacy Policy.");
+      return;
+    }
+
+    var formData = collectFormData();
+    var price = PLAN_PRICES[formData.plan] || 0;
+
+    if (price > 0) {
+      proceedToPayment(formData, price);
+    } else {
+      submitForm(formData); // Free plan — unchanged existing flow
+    }
+  });
+}
+
+// --- ADD new functions ---
+function proceedToPayment(formData, price) {
+  // Full application data — payment.js never touches this key, so it
+  // survives the round trip untouched.
+  sessionStorage.setItem("eventpay_pending_application", JSON.stringify(formData));
+
+  // Matches payment.js's own stash shape/key exactly (plan, price,
+  // organizerEmail, organizerName, organizerPhone, returnUrl).
+  sessionStorage.setItem("ep_pending_plan", JSON.stringify({
+    plan: formData.plan,
+    price: price,
+    organizerEmail: formData.organizerEmail,
+    organizerName: formData.organizerName,
+    organizerPhone: formData.organizerPhone,
+    returnUrl: "apply-event.html"
+  }));
+
+  // Matches payment.js's readIncomingData() query param names.
+  var qs = new URLSearchParams({
+    plan: formData.plan,
+    price: price,
+    email: formData.organizerEmail,
+    name: formData.organizerName,
+    phone: formData.organizerPhone,
+    returnUrl: "apply-event.html"
+  });
+
+  window.location.href = "payment.html?" + qs.toString();
+}
+
+function handlePaymentReturn() {
+  var params = new URLSearchParams(window.location.search);
+  var status = params.get("paymentStatus");
+  if (!status) return;
+
+  window.history.replaceState({}, document.title, window.location.pathname);
+
+  var stored = sessionStorage.getItem("eventpay_pending_application");
+  if (!stored) {
+    if (status === "failed") showToast("Payment Failed.");
+    return;
+  }
+
+  var formData = JSON.parse(stored);
+  sessionStorage.removeItem("eventpay_pending_application");
+  sessionStorage.removeItem("ep_pending_plan");
+
+  if (status === "success") {
+    formData.eventStatus = "Active";
+    goToStep(4);
+    submitForm(formData);
+  } else if (status === "pendingVerification") {
+    formData.eventStatus = "Inactive"; // Direct UPI, awaiting manual verification
+    goToStep(4);
+    submitForm(formData);
+  } else if (status === "failed") {
+    goToStep(4);
+    showToast("Payment Failed. Your event was not created.");
+  }
+}
+
+
+
+
 
