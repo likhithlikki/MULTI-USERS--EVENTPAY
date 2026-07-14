@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Subscription Payment — EventPay</title>
+<link rel="stylesheet" href="apply-event.css">
+<link rel="stylesheet" href="payment.css">
+</head>
+<body>
+
+<div class="page">
+
+  <header class="topbar">
+    <div class="brand">EventPay</div>
+  </header>
+
+  <main class="card-wrap">
+
+    <!-- ================= SUMMARY ================= -->
+    <section id="summaryBlock" class="pay-section">
+      <h2>Subscription Purchase</h2>
+      <p class="subtitle">Complete your payment to activate your plan.</p>
+
+      <div class="plan-summary">
+        <div class="plan-summary-row">
+          <span class="label">Selected Plan</span>
+          <span class="value" id="planName">—</span>
+        </div>
+        <div class="plan-summary-row">
+          <span class="label">Amount</span>
+          <span class="value price" id="planPrice">₹0</span>
+        </div>
+      </div>
+
+      <ul class="benefits-list" id="benefitsList"></ul>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- ================= METHOD SELECT ================= -->
+    <section class="pay-section">
+      <h3>Choose Payment Method</h3>
+
+      <div class="method-grid">
+        <label class="method-card">
+          <input type="radio" name="payMethod" value="razorpay" checked>
+          <div class="method-name">Razorpay</div>
+          <div class="method-desc">Cards, Netbanking, UPI, Wallets</div>
+        </label>
+        <label class="method-card">
+          <input type="radio" name="payMethod" value="upi">
+          <div class="method-name">Direct UPI</div>
+          <div class="method-desc">Scan QR & pay manually</div>
+        </label>
+      </div>
+
+      <!-- ---- Razorpay block ---- -->
+      <div id="razorpayBlock" class="method-block">
+        <p class="hint">You'll be redirected to Razorpay's secure checkout.</p>
+        <button type="button" class="btn-primary full-width" id="payNowBtn">Pay Now</button>
+      </div>
+
+      <!-- ---- Direct UPI block ---- -->
+      <div id="upiBlock" class="method-block hidden">
+        <div class="upi-qr-wrap">
+          <img id="upiQrImg" alt="UPI QR Code" class="upi-qr">
+        </div>
+
+        <label>UPI ID</label>
+        <input type="text" id="upiIdDisplay" readonly>
+
+        <label>Amount</label>
+        <input type="text" id="upiAmountDisplay" readonly>
+
+        <label>Enter UTR / Transaction Reference Number</label>
+        <input type="text" id="utrInput" placeholder="12-digit UTR">
+
+        <button type="button" class="btn-primary full-width" id="submitUpiBtn">Submit Payment</button>
+      </div>
+    </section>
+
+    <!-- ================= RESULT ================= -->
+    <section id="resultBlock" class="pay-section hidden">
+      <div class="result-icon" id="resultIcon">✓</div>
+      <h2 id="resultTitle">Payment Successful</h2>
+      <p class="subtitle" id="resultSubtitle">Your subscription has been activated.</p>
+
+      <div class="result-details" id="resultDetails"></div>
+
+      <div class="nav-row">
+        <button type="button" class="btn-ghost" id="retryBtn">Retry</button>
+        <button type="button" class="btn-ghost" id="backBtn">Back</button>
+        <button type="button" class="btn-primary" id="continueBtn">Continue</button>
+      </div>
+    </section>
+
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+  <div id="loadingOverlay" class="loading-overlay hidden">
+    <div class="spinner"></div>
+    <div id="loadingText">Working…</div>
+  </div>
+
+</div>
+
+<script src="config.js"></script>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script src="payment.js"></script>
+
+</body>
+</html>
