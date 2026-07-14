@@ -59,6 +59,8 @@
     state.organizerEmail = qs.get("email") || stashed.organizerEmail || "";
     state.organizerName = qs.get("name") || stashed.organizerName || "";
     state.organizerPhone = qs.get("phone") || stashed.organizerPhone || "";
+    // --- IN readIncomingData(), ADD after state.organizerPhone assignment ---
+state.returnUrl = qs.get("returnUrl") || stashed.returnUrl || "apply-event.html";
   }
 
   function renderSummary() {
@@ -231,6 +233,43 @@
           subtitle: (res && res.message) || "Signature verification failed.",
           details: {}
         });
+
+
+
+// --- REPLACE bindResultButtons() ---
+function bindResultButtons() {
+  document.getElementById("retryBtn").addEventListener("click", function () {
+    window.location.reload();
+  });
+  document.getElementById("backBtn").addEventListener("click", function () {
+    // CHANGED: was hardcoded "create-event.html" with no status.
+    // Now returns to the actual form page and reports failure so
+    // it can stop the flow instead of silently resuming.
+    window.location.href = state.returnUrl + "?paymentStatus=failed";
+  });
+  document.getElementById("continueBtn").addEventListener("click", function () {
+    // CHANGED: was hardcoded "create-event.html".
+    var target = state.returnUrl;
+    if (pendingReturnParams) {
+      var qs = new URLSearchParams(pendingReturnParams);
+      target += "?" + qs.toString();
+    }
+    window.location.href = target;
+  });
+}
+
+
+
+
+        
+
+
+
+
+
+
+
+        
       }
     }).catch(function (err) {
       setLoading(false);
@@ -375,3 +414,4 @@
   }
 
 })();
+
