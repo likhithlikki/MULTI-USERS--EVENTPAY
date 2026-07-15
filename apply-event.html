@@ -79,9 +79,17 @@
           </label>
         </div>
 
+        <!--
+          Single button for Step 2.
+          - No plan selected  -> disabled, "Select a Plan"
+          - Free selected     -> enabled, "Continue" (no payment)
+          - Premium selected  -> enabled, "Pay ₹1499" (redirects to payment.html)
+          - Enterprise select -> enabled, "Pay ₹4999" (redirects to payment.html)
+          Logic lives entirely in apply-event.js (bindPlanSelection / updatePlanContinueBtn / handlePlanContinueClick).
+        -->
         <div class="nav-row">
           <button type="button" class="btn-ghost" data-prev>Back</button>
-          <button type="button" class="btn-primary" data-next>Continue</button>
+          <button type="button" class="btn-primary" id="planContinueBtn" disabled>Select a Plan</button>
         </div>
       </section>
 
