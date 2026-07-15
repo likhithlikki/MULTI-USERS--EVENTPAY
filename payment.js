@@ -27,6 +27,7 @@
     organizerEmail: "",
     organizerName: "",
     organizerPhone: "",
+    returnUrl: "apply-event.html",
     gateway: null // cached getPaymentGatewaySettings response
   };
 
@@ -59,8 +60,7 @@
     state.organizerEmail = qs.get("email") || stashed.organizerEmail || "";
     state.organizerName = qs.get("name") || stashed.organizerName || "";
     state.organizerPhone = qs.get("phone") || stashed.organizerPhone || "";
-    // --- IN readIncomingData(), ADD after state.organizerPhone assignment ---
-state.returnUrl = qs.get("returnUrl") || stashed.returnUrl || "apply-event.html";
+    state.returnUrl = qs.get("returnUrl") || stashed.returnUrl || "apply-event.html";
   }
 
   function renderSummary() {
@@ -233,43 +233,6 @@ state.returnUrl = qs.get("returnUrl") || stashed.returnUrl || "apply-event.html"
           subtitle: (res && res.message) || "Signature verification failed.",
           details: {}
         });
-
-
-
-// --- REPLACE bindResultButtons() ---
-function bindResultButtons() {
-  document.getElementById("retryBtn").addEventListener("click", function () {
-    window.location.reload();
-  });
-  document.getElementById("backBtn").addEventListener("click", function () {
-    // CHANGED: was hardcoded "create-event.html" with no status.
-    // Now returns to the actual form page and reports failure so
-    // it can stop the flow instead of silently resuming.
-    window.location.href = state.returnUrl + "?paymentStatus=failed";
-  });
-  document.getElementById("continueBtn").addEventListener("click", function () {
-    // CHANGED: was hardcoded "create-event.html".
-    var target = state.returnUrl;
-    if (pendingReturnParams) {
-      var qs = new URLSearchParams(pendingReturnParams);
-      target += "?" + qs.toString();
-    }
-    window.location.href = target;
-  });
-}
-
-
-
-
-        
-
-
-
-
-
-
-
-        
       }
     }).catch(function (err) {
       setLoading(false);
@@ -364,15 +327,21 @@ function bindResultButtons() {
     document.getElementById("continueBtn").classList.toggle("hidden", !success);
   }
 
+  // Uses state.returnUrl (the page that sent us here, e.g. apply-event.html)
+  // instead of a hardcoded page, and appends the paymentStatus (plus any
+  // transaction details) so the return page can resume the correct branch
+  // of the flow (success / pendingVerification / failed).
   function bindResultButtons() {
     document.getElementById("retryBtn").addEventListener("click", function () {
       window.location.reload();
     });
+
     document.getElementById("backBtn").addEventListener("click", function () {
-      window.location.href = "create-event.html";
+      window.location.href = state.returnUrl + "?paymentStatus=failed";
     });
+
     document.getElementById("continueBtn").addEventListener("click", function () {
-      var target = "create-event.html";
+      var target = state.returnUrl;
       if (pendingReturnParams) {
         var qs = new URLSearchParams(pendingReturnParams);
         target += "?" + qs.toString();
@@ -414,4 +383,3 @@ function bindResultButtons() {
   }
 
 })();
-
