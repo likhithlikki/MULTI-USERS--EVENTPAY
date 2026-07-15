@@ -5,7 +5,8 @@
     currentStep: 1,
     totalSteps: 5,
     otpVerified: false,
-    duplicateAcknowledged: false
+    duplicateAcknowledged: false,
+    eventStatus: null // "Active" (free / razorpay success) or "Inactive" (UPI pending), set at Step 2 / on payment return
   };
 
   var PLAN_PRICES = { "Free": 0, "Premium": 1499, "Enterprise": 4999 };
@@ -48,6 +49,7 @@
     bindNav();
     bindOtp();
     bindEventTypeChange();
+    bindPlanSelection();
     bindSubmit();
     bindResultButtons();
     handlePaymentReturn(); // resume flow after returning from payment.html
@@ -84,6 +86,10 @@
       dot.classList.toggle("active", Number(dot.dataset.step) <= step);
     });
 
+    if (step === 2) {
+      updatePlanContinueBtn();
+    }
+
     if (step === 4) {
       renderDynamicFields(getSelectedEventType());
     }
@@ -110,13 +116,8 @@
       return true;
     }
 
-    if (step === 2) {
-      if (!getSelectedPlan()) {
-        showToast("Please select a plan.");
-        return false;
-      }
-      return true;
-    }
+    // Step 2 no longer uses [data-next] — it has its own
+    // planContinueBtn / handlePlanContinueClick flow below.
 
     if (step === 3) {
       if (!getSelectedEventType()) {
@@ -191,6 +192,64 @@
   }
 
   // ---------------------------------------------------------
+  // PLAN SELECTION (STEP 2)
+  // ---------------------------------------------------------
+  //
+  // Single button (#planContinueBtn) drives everything:
+  //  - no plan checked   -> disabled, "Select a Plan"
+  //  - Free checked      -> enabled, "Continue"      -> goToStep(3), no payment
+  //  - Premium checked   -> enabled, "Pay ₹1499"      -> proceedToPayment()
+  //  - Enterprise checked-> enabled, "Pay ₹4999"      -> proceedToPayment()
+  // ---------------------------------------------------------
+
+  function bindPlanSelection() {
+    document.querySelectorAll('input[name="plan"]').forEach(function (radio) {
+      radio.addEventListener("change", updatePlanContinueBtn);
+    });
+    document.getElementById("planContinueBtn").addEventListener("click", handlePlanContinueClick);
+    updatePlanContinueBtn();
+  }
+
+  function updatePlanContinueBtn() {
+    var btn = document.getElementById("planContinueBtn");
+    if (!btn) return;
+
+    var plan = getSelectedPlan();
+
+    if (!plan) {
+      btn.disabled = true;
+      btn.textContent = "Select a Plan";
+      return;
+    }
+
+    var price = PLAN_PRICES[plan] || 0;
+    btn.disabled = false;
+    btn.textContent = price > 0 ? ("Pay \u20B9" + price) : "Continue";
+  }
+
+  function handlePlanContinueClick() {
+    var plan = getSelectedPlan();
+    if (!plan) return;
+
+    var price = PLAN_PRICES[plan] || 0;
+
+    if (price <= 0) {
+      state.eventStatus = "Active"; // Free plan — unchanged existing behavior, no payment
+      goToStep(3);
+      return;
+    }
+
+    proceedToPayment(plan, price);
+  }
+
+  function resetPlanSelection() {
+    document.querySelectorAll('input[name="plan"]').forEach(function (r) {
+      r.checked = false;
+    });
+    updatePlanContinueBtn();
+  }
+
+  // ---------------------------------------------------------
   // DYNAMIC FIELDS
   // ---------------------------------------------------------
 
@@ -222,62 +281,32 @@
   }
 
   // ---------------------------------------------------------
-  // SUBMIT / PAYMENT GATE
-  // ---------------------------------------------------------
-  //
-  // Behavior:
-  //  - Free plan (price <= 0): unchanged existing flow, submits directly.
-  //  - Paid plan (Premium/Enterprise): redirect to payment.html instead of
-  //    submitting. The existing "Create Event" button (submitBtn) is reused
-  //    as-is; no new button is created. No submitEventApplication,
-  //    checkDuplicateEvent, spreadsheet, or Drive folder calls happen until
-  //    payment.html reports back with a paymentStatus.
+  // PAYMENT REDIRECT / RETURN (triggered from Step 2 only)
   // ---------------------------------------------------------
 
-  function bindSubmit() {
-    document.getElementById("applyForm").addEventListener("submit", function (e) {
-      e.preventDefault();
-
-      if (!document.getElementById("termsCheck").checked ||
-          !document.getElementById("privacyCheck").checked) {
-        showToast("Please accept both Terms & Conditions and Privacy Policy.");
-        return;
-      }
-
-      var formData = collectFormData();
-      var price = PLAN_PRICES[formData.plan] || 0;
-
-      if (price > 0) {
-        proceedToPayment(formData, price);
-      } else {
-        submitForm(formData); // Free plan — unchanged existing flow
-      }
-    });
-  }
-
-  function proceedToPayment(formData, price) {
-    // Full application data — payment.js never touches this key, so it
-    // survives the round trip untouched.
-    sessionStorage.setItem("eventpay_pending_application", JSON.stringify(formData));
+  function proceedToPayment(plan, price) {
+    var email = val("organizerEmail");
+    var name = val("organizerName");
+    var phone = val("organizerPhone");
 
     // Matches payment.js's own stash shape/key exactly (plan, price,
     // organizerEmail, organizerName, organizerPhone, returnUrl).
     sessionStorage.setItem("ep_pending_plan", JSON.stringify({
-      plan: formData.plan,
+      plan: plan,
       price: price,
-      organizerEmail: formData.organizerEmail,
-      organizerName: formData.organizerName,
-      organizerPhone: formData.organizerPhone,
+      organizerEmail: email,
+      organizerName: name,
+      organizerPhone: phone,
       returnUrl: "apply-event.html"
     }));
 
     // Matches payment.js's readIncomingData() query param names.
     var qs = new URLSearchParams({
-      plan: formData.plan,
+      plan: plan,
       price: price,
-      email: formData.organizerEmail,
-      name: formData.organizerName,
-      phone: formData.organizerPhone,
+      email: email,
+      name: name,
+      phone: phone,
       returnUrl: "apply-event.html"
     });
 
@@ -292,27 +321,21 @@
     // Clean the URL so a refresh doesn't re-trigger this.
     window.history.replaceState({}, document.title, window.location.pathname);
 
-    var stored = sessionStorage.getItem("eventpay_pending_application");
-    if (!stored) {
-      if (status === "failed") showToast("Payment Failed.");
-      return;
-    }
-
-    var formData = JSON.parse(stored);
-    sessionStorage.removeItem("eventpay_pending_application");
     sessionStorage.removeItem("ep_pending_plan");
+    sessionStorage.removeItem("eventpay_pending_application"); // legacy key, no longer used
 
     if (status === "success") {
-      formData.eventStatus = "Active";
-      goToStep(4);
-      submitForm(formData);
+      // Razorpay success
+      state.eventStatus = "Active";
+      goToStep(3); // automatically continue to Event Details
     } else if (status === "pendingVerification") {
-      formData.eventStatus = "Inactive"; // Direct UPI, awaiting manual verification
-      goToStep(4);
-      submitForm(formData);
+      // Direct UPI — awaiting manual verification
+      state.eventStatus = "Inactive";
+      goToStep(3); // automatically continue to Event Details
     } else if (status === "failed") {
-      goToStep(4);
-      showToast("Payment Failed. Your event was not created.");
+      goToStep(2);
+      resetPlanSelection();
+      showToast("Payment Failed. Please select a plan to try again.");
     }
   }
 
@@ -332,6 +355,7 @@
       upiId: val("upiId"),
       description: val("description"),
 
+      eventStatus: state.eventStatus || "Active",
       confirmDuplicateOverride: state.duplicateAcknowledged
     };
 
@@ -356,6 +380,25 @@
       case "Baby Shower": return "Baby Shower Celebration";
       default: return data.customEventName || "Event";
     }
+  }
+
+  // ---------------------------------------------------------
+  // FINAL SUBMIT (STEP 4) — payment already resolved at Step 2
+  // ---------------------------------------------------------
+
+  function bindSubmit() {
+    document.getElementById("applyForm").addEventListener("submit", function (e) {
+      e.preventDefault();
+
+      if (!document.getElementById("termsCheck").checked ||
+          !document.getElementById("privacyCheck").checked) {
+        showToast("Please accept both Terms & Conditions and Privacy Policy.");
+        return;
+      }
+
+      var formData = collectFormData();
+      submitForm(formData);
+    });
   }
 
   function submitForm(formData) {
