@@ -314,30 +314,42 @@
   }
 
   function handlePaymentReturn() {
-    var params = new URLSearchParams(window.location.search);
-    var status = params.get("paymentStatus");
-    if (!status) return;
+  var params = new URLSearchParams(window.location.search);
+  var status = params.get("paymentStatus");
+  if (!status) return;
 
-    // Clean the URL so a refresh doesn't re-trigger this.
-    window.history.replaceState({}, document.title, window.location.pathname);
+  window.history.replaceState({}, document.title, window.location.pathname);
 
-    sessionStorage.removeItem("ep_pending_plan");
-    sessionStorage.removeItem("eventpay_pending_application"); // legacy key, no longer used
+  // Read the stash BEFORE deleting it, and restore it into the form.
+  var stashed = {};
+  try { stashed = JSON.parse(sessionStorage.getItem("ep_pending_plan") || "{}"); } catch (e) {}
 
-    if (status === "success") {
-      // Razorpay success
-      state.eventStatus = "Active";
-      goToStep(3); // automatically continue to Event Details
-    } else if (status === "pendingVerification") {
-      // Direct UPI — awaiting manual verification
-      state.eventStatus = "Inactive";
-      goToStep(3); // automatically continue to Event Details
-    } else if (status === "failed") {
-      goToStep(2);
-      resetPlanSelection();
-      showToast("Payment Failed. Please select a plan to try again.");
-    }
+  if (stashed.organizerName)  document.getElementById("organizerName").value  = stashed.organizerName;
+  if (stashed.organizerPhone) document.getElementById("organizerPhone").value = stashed.organizerPhone;
+  if (stashed.organizerEmail) document.getElementById("organizerEmail").value = stashed.organizerEmail;
+  if (stashed.plan) {
+    state.plan = stashed.plan; // fallback used by collectFormData()
+    var radio = document.querySelector('input[name="plan"][value="' + stashed.plan + '"]');
+    if (radio) radio.checked = true;
+    updatePlanContinueBtn();
   }
+  state.otpVerified = true; // they already verified OTP before reaching Step 2
+
+  sessionStorage.removeItem("ep_pending_plan");
+  sessionStorage.removeItem("eventpay_pending_application");
+
+  if (status === "success") {
+    state.eventStatus = "Active";
+    goToStep(3);
+  } else if (status === "pendingVerification") {
+    state.eventStatus = "Inactive";
+    goToStep(3);
+  } else if (status === "failed") {
+    goToStep(2);
+    resetPlanSelection();
+    showToast("Payment Failed. Please select a plan to try again.");
+  }
+}
 
   function collectFormData() {
     var eventType = getSelectedEventType();
@@ -345,7 +357,7 @@
       organizerName: val("organizerName"),
       organizerPhone: val("organizerPhone"),
       organizerEmail: val("organizerEmail"),
-      plan: getSelectedPlan(),
+      plan: getSelectedPlan() || state.plan,
       eventType: eventType,
       eventDate: val("eventDate"),
       eventTime: val("eventTime"),
