@@ -45,16 +45,20 @@
 
   document.addEventListener("DOMContentLoaded", init);
 
-  function init() {
-    bindNav();
-    bindOtp();
-    bindEventTypeChange();
-    bindPlanSelection();
-    bindSubmit();
-    bindResultButtons();
-    handlePaymentReturn(); // resume flow after returning from payment.html
+function init() {
+  bindNav();
+  bindOtp();
+  bindEventTypeChange();
+  bindPlanSelection();
+  bindSubmit();
+  bindResultButtons();
+
+  var resumed = handlePaymentReturn();
+
+  if (!resumed) {
     goToStep(1);
   }
+}
 
   // ---------------------------------------------------------
   // STEP NAVIGATION
@@ -314,9 +318,10 @@
   }
 
   function handlePaymentReturn() {
-  var params = new URLSearchParams(window.location.search);
-  var status = params.get("paymentStatus");
-  if (!status) return;
+var params = new URLSearchParams(window.location.search);
+var status = params.get("paymentStatus");
+
+if (!status) return false;
 
   window.history.replaceState({}, document.title, window.location.pathname);
 
@@ -375,6 +380,7 @@ if (stashed.plan) {
     resetPlanSelection();
     showToast("Payment Failed. Please select a plan to try again.");
   }
+    return true;
 }
 
   function collectFormData() {
