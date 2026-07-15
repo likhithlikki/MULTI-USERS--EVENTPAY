@@ -334,7 +334,33 @@
     updatePlanContinueBtn();
   }
   state.otpVerified = true; // they already verified OTP before reaching Step 2
+var stashed = {};
+try {
+    stashed = JSON.parse(sessionStorage.getItem("ep_pending_plan") || "{}");
+} catch (e) {}
 
+if (stashed.organizerName)
+    document.getElementById("organizerName").value = stashed.organizerName;
+
+if (stashed.organizerPhone)
+    document.getElementById("organizerPhone").value = stashed.organizerPhone;
+
+if (stashed.organizerEmail)
+    document.getElementById("organizerEmail").value = stashed.organizerEmail;
+
+if (stashed.plan) {
+    state.plan = stashed.plan;
+
+    var radio = document.querySelector(
+        'input[name="plan"][value="' + stashed.plan + '"]'
+    );
+
+    if (radio)
+        radio.checked = true;
+
+    updatePlanContinueBtn();
+}
+    
   sessionStorage.removeItem("ep_pending_plan");
   sessionStorage.removeItem("eventpay_pending_application");
 
