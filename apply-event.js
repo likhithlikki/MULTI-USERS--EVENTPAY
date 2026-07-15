@@ -1,6 +1,3 @@
-
-
-
 (function () {
   "use strict";
 
@@ -10,6 +7,8 @@
     otpVerified: false,
     duplicateAcknowledged: false
   };
+
+  var PLAN_PRICES = { "Free": 0, "Premium": 1499, "Enterprise": 4999 };
 
   var DYNAMIC_FIELDS = {
     "Marriage": [
@@ -51,6 +50,7 @@
     bindEventTypeChange();
     bindSubmit();
     bindResultButtons();
+    handlePaymentReturn(); // resume flow after returning from payment.html
     goToStep(1);
   }
 
@@ -153,19 +153,12 @@
             showToast(res.message || "Failed to send OTP.");
           }
         })
-     .catch(function (err) {
-    setLoading(false);
-
-    console.error(err);
-
-    alert(
-        err && err.stack
-            ? err.stack
-            : JSON.stringify(err, null, 2)
-    );
-
-    showToast("Error: " + err);
-});
+        .catch(function (err) {
+          setLoading(false);
+          console.error(err);
+          alert(err && err.stack ? err.stack : JSON.stringify(err, null, 2));
+          showToast("Error: " + err);
+        });
     });
 
     document.getElementById("verifyOtpBtn").addEventListener("click", function () {
@@ -188,19 +181,12 @@
             showToast(res.message || "Invalid OTP.");
           }
         })
-     .catch(function (err) {
-    setLoading(false);
-
-    console.error(err);
-
-    alert(
-        err && err.stack
-            ? err.stack
-            : JSON.stringify(err, null, 2)
-    );
-
-    showToast("Error: " + err);
-});
+        .catch(function (err) {
+          setLoading(false);
+          console.error(err);
+          alert(err && err.stack ? err.stack : JSON.stringify(err, null, 2));
+          showToast("Error: " + err);
+        });
     });
   }
 
@@ -236,7 +222,16 @@
   }
 
   // ---------------------------------------------------------
-  // SUBMIT
+  // SUBMIT / PAYMENT GATE
+  // ---------------------------------------------------------
+  //
+  // Behavior:
+  //  - Free plan (price <= 0): unchanged existing flow, submits directly.
+  //  - Paid plan (Premium/Enterprise): redirect to payment.html instead of
+  //    submitting. The existing "Create Event" button (submitBtn) is reused
+  //    as-is; no new button is created. No submitEventApplication,
+  //    checkDuplicateEvent, spreadsheet, or Drive folder calls happen until
+  //    payment.html reports back with a paymentStatus.
   // ---------------------------------------------------------
 
   function bindSubmit() {
@@ -249,10 +244,76 @@
         return;
       }
 
-     var formData = collectFormData();
+      var formData = collectFormData();
+      var price = PLAN_PRICES[formData.plan] || 0;
 
-      submitForm(formData);
+      if (price > 0) {
+        proceedToPayment(formData, price);
+      } else {
+        submitForm(formData); // Free plan — unchanged existing flow
+      }
     });
+  }
+
+  function proceedToPayment(formData, price) {
+    // Full application data — payment.js never touches this key, so it
+    // survives the round trip untouched.
+    sessionStorage.setItem("eventpay_pending_application", JSON.stringify(formData));
+
+    // Matches payment.js's own stash shape/key exactly (plan, price,
+    // organizerEmail, organizerName, organizerPhone, returnUrl).
+    sessionStorage.setItem("ep_pending_plan", JSON.stringify({
+      plan: formData.plan,
+      price: price,
+      organizerEmail: formData.organizerEmail,
+      organizerName: formData.organizerName,
+      organizerPhone: formData.organizerPhone,
+      returnUrl: "apply-event.html"
+    }));
+
+    // Matches payment.js's readIncomingData() query param names.
+    var qs = new URLSearchParams({
+      plan: formData.plan,
+      price: price,
+      email: formData.organizerEmail,
+      name: formData.organizerName,
+      phone: formData.organizerPhone,
+      returnUrl: "apply-event.html"
+    });
+
+    window.location.href = "payment.html?" + qs.toString();
+  }
+
+  function handlePaymentReturn() {
+    var params = new URLSearchParams(window.location.search);
+    var status = params.get("paymentStatus");
+    if (!status) return;
+
+    // Clean the URL so a refresh doesn't re-trigger this.
+    window.history.replaceState({}, document.title, window.location.pathname);
+
+    var stored = sessionStorage.getItem("eventpay_pending_application");
+    if (!stored) {
+      if (status === "failed") showToast("Payment Failed.");
+      return;
+    }
+
+    var formData = JSON.parse(stored);
+    sessionStorage.removeItem("eventpay_pending_application");
+    sessionStorage.removeItem("ep_pending_plan");
+
+    if (status === "success") {
+      formData.eventStatus = "Active";
+      goToStep(4);
+      submitForm(formData);
+    } else if (status === "pendingVerification") {
+      formData.eventStatus = "Inactive"; // Direct UPI, awaiting manual verification
+      goToStep(4);
+      submitForm(formData);
+    } else if (status === "failed") {
+      goToStep(4);
+      showToast("Payment Failed. Your event was not created.");
+    }
   }
 
   function collectFormData() {
@@ -270,7 +331,7 @@
       expectedGuests: val("expectedGuests"),
       upiId: val("upiId"),
       description: val("description"),
-     
+
       confirmDuplicateOverride: state.duplicateAcknowledged
     };
 
@@ -299,67 +360,70 @@
 
   function submitForm(formData) {
 
-  setLoading(true, "Checking for duplicates…");
+    setLoading(true, "Checking for duplicates…");
 
-  runServer("checkDuplicateEvent", {
-    organizerEmail: formData.organizerEmail,
-    eventDate: formData.eventDate,
-    eventName: formData.autoEventName
-  })
+    runServer("checkDuplicateEvent", {
+      organizerEmail: formData.organizerEmail,
+      eventDate: formData.eventDate,
+      eventName: formData.autoEventName
+    })
 
-  .then(function (dupRes) {
+    .then(function (dupRes) {
 
-    if (dupRes.duplicate && !state.duplicateAcknowledged) {
+      if (dupRes.duplicate && !state.duplicateAcknowledged) {
+
+        setLoading(false);
+
+        var box = document.getElementById("duplicateWarning");
+        box.textContent =
+          dupRes.message + " Click Create Event again to proceed anyway.";
+
+        box.classList.remove("hidden");
+        state.duplicateAcknowledged = true;
+        return;
+      }
+
+      setLoading(true, "Creating your event...\nEstimated time: less than 1 minute.");
+      startLoadingCountdown();
+
+      return runServer("submitEventApplication", formData);
+
+    })
+
+    .then(function (res) {
+
+      if (!res) return; // duplicate-warning early return above
 
       setLoading(false);
 
-      var box = document.getElementById("duplicateWarning");
-      box.textContent =
-        dupRes.message + " Click Create Event again to proceed anyway.";
+      console.log("submitEventApplication response:", res);
 
-      box.classList.remove("hidden");
-      state.duplicateAcknowledged = true;
-      return;
-    }
+      if (res.success) {
+        stopLoadingCountdown();
+        showResult(res);
+        goToStep(5);
 
-setLoading(true, "Creating your event...\nEstimated time: less than 1 minute.");
-startLoadingCountdown();
+      } else {
 
-    return runServer("submitEventApplication", formData);
+        console.error("Submit Error:", res);
+        alert(JSON.stringify(res, null, 2));
+        stopLoadingCountdown();
+        showToast(res.message || "Something went wrong.");
 
-  })
+      }
 
-  .then(function (res) {
+    })
 
-    setLoading(false);
-
-    console.log("submitEventApplication response:", res);
-
-    if (res.success) {
-stopLoadingCountdown();
-      showResult(res);
-      goToStep(5);
-
-    } else {
-
-      console.error("Submit Error:", res);
-      alert(JSON.stringify(res, null, 2));
+    .catch(function (err) {
       stopLoadingCountdown();
-      showToast(res.message || "Something went wrong.");
+      setLoading(false);
+      console.error(err);
+      showToast("Error: " + err);
 
-    }
+    });
 
-  })
+  }
 
-  .catch(function (err) {
-stopLoadingCountdown();
-    setLoading(false);
-    console.error(err);
-    showToast("Error: " + err);
-
-  });
-
-}
   // ---------------------------------------------------------
   // RESULT / SUCCESS SCREEN
   // ---------------------------------------------------------
@@ -469,9 +533,9 @@ stopLoadingCountdown();
    * since this page is static (GitHub Pages), not HtmlService.
    */
   function runServer(actionName, params) {
-if (!APP_CONFIG.SCRIPT_URL) {
-    return Promise.reject("SCRIPT_URL is not configured.");
-}
+    if (!APP_CONFIG.SCRIPT_URL) {
+      return Promise.reject("SCRIPT_URL is not configured.");
+    }
 
     var body = new URLSearchParams();
     body.set("action", actionName);
@@ -479,7 +543,7 @@ if (!APP_CONFIG.SCRIPT_URL) {
       body.set(key, params[key] === undefined || params[key] === null ? "" : String(params[key]));
     });
 
-return fetch(APP_CONFIG.SCRIPT_URL, {
+    return fetch(APP_CONFIG.SCRIPT_URL, {
       method: "POST",
       body: body
     })
@@ -501,160 +565,47 @@ return fetch(APP_CONFIG.SCRIPT_URL, {
       });
   }
 
-})();
+  // ---------------------------------------------------------
+  // LOADING COUNTDOWN (used only during submitEventApplication)
+  // ---------------------------------------------------------
 
+  var loadingTimer = null;
+  var loadingSeconds = 60;
 
-
-
-let loadingTimer = null;
-let loadingSeconds = 60;
-
-function startLoadingCountdown() {
-
+  function startLoadingCountdown() {
     loadingSeconds = 60;
 
-    const txt = document.getElementById("loadingText");
+    var txt = document.getElementById("loadingText");
 
     if (loadingTimer) clearInterval(loadingTimer);
 
     txt.innerHTML =
+      "Creating your event...<br>" +
+      "This may take up to 1 minute.<br><br>" +
+      "<b>Time Remaining: 60 sec</b>";
+
+    loadingTimer = setInterval(function () {
+
+      loadingSeconds--;
+
+      txt.innerHTML =
         "Creating your event...<br>" +
         "This may take up to 1 minute.<br><br>" +
-        "<b>Time Remaining: 60 sec</b>";
+        "<b>Time Remaining: " + loadingSeconds + " sec</b>";
 
-    loadingTimer = setInterval(() => {
-
-        loadingSeconds--;
-
-        txt.innerHTML =
-            "Creating your event...<br>" +
-            "This may take up to 1 minute.<br><br>" +
-            "<b>Time Remaining: " + loadingSeconds + " sec</b>";
-
-        if (loadingSeconds <= 0) {
-
-            clearInterval(loadingTimer);
-
-            txt.innerHTML =
-                "Almost done...<br>Please wait a few more seconds.";
-
-        }
-
-    },1000);
-
-}
-
-function stopLoadingCountdown(){
-
-    if(loadingTimer){
-
+      if (loadingSeconds <= 0) {
         clearInterval(loadingTimer);
+        txt.innerHTML = "Almost done...<br>Please wait a few more seconds.";
+      }
 
-        loadingTimer = null;
-
-    }
-
-}
-
-
-// --- ADD near top, after DYNAMIC_FIELDS ---
-var PLAN_PRICES = { "Free": 0, "Premium": 1499, "Enterprise": 4999 };
-
-// --- ADD to init() ---
-function init() {
-  bindNav();
-  bindOtp();
-  bindEventTypeChange();
-  bindSubmit();
-  bindResultButtons();
-  handlePaymentReturn();   // NEW: resume flow after returning from payment.html
-  goToStep(1);
-}
-
-// --- REPLACE bindSubmit()'s submit listener body ---
-function bindSubmit() {
-  document.getElementById("applyForm").addEventListener("submit", function (e) {
-    e.preventDefault();
-
-    if (!document.getElementById("termsCheck").checked ||
-        !document.getElementById("privacyCheck").checked) {
-      showToast("Please accept both Terms & Conditions and Privacy Policy.");
-      return;
-    }
-
-    var formData = collectFormData();
-    var price = PLAN_PRICES[formData.plan] || 0;
-
-    if (price > 0) {
-      proceedToPayment(formData, price);
-    } else {
-      submitForm(formData); // Free plan — unchanged existing flow
-    }
-  });
-}
-
-// --- ADD new functions ---
-function proceedToPayment(formData, price) {
-  // Full application data — payment.js never touches this key, so it
-  // survives the round trip untouched.
-  sessionStorage.setItem("eventpay_pending_application", JSON.stringify(formData));
-
-  // Matches payment.js's own stash shape/key exactly (plan, price,
-  // organizerEmail, organizerName, organizerPhone, returnUrl).
-  sessionStorage.setItem("ep_pending_plan", JSON.stringify({
-    plan: formData.plan,
-    price: price,
-    organizerEmail: formData.organizerEmail,
-    organizerName: formData.organizerName,
-    organizerPhone: formData.organizerPhone,
-    returnUrl: "apply-event.html"
-  }));
-
-  // Matches payment.js's readIncomingData() query param names.
-  var qs = new URLSearchParams({
-    plan: formData.plan,
-    price: price,
-    email: formData.organizerEmail,
-    name: formData.organizerName,
-    phone: formData.organizerPhone,
-    returnUrl: "apply-event.html"
-  });
-
-  window.location.href = "payment.html?" + qs.toString();
-}
-
-function handlePaymentReturn() {
-  var params = new URLSearchParams(window.location.search);
-  var status = params.get("paymentStatus");
-  if (!status) return;
-
-  window.history.replaceState({}, document.title, window.location.pathname);
-
-  var stored = sessionStorage.getItem("eventpay_pending_application");
-  if (!stored) {
-    if (status === "failed") showToast("Payment Failed.");
-    return;
+    }, 1000);
   }
 
-  var formData = JSON.parse(stored);
-  sessionStorage.removeItem("eventpay_pending_application");
-  sessionStorage.removeItem("ep_pending_plan");
-
-  if (status === "success") {
-    formData.eventStatus = "Active";
-    goToStep(4);
-    submitForm(formData);
-  } else if (status === "pendingVerification") {
-    formData.eventStatus = "Inactive"; // Direct UPI, awaiting manual verification
-    goToStep(4);
-    submitForm(formData);
-  } else if (status === "failed") {
-    goToStep(4);
-    showToast("Payment Failed. Your event was not created.");
+  function stopLoadingCountdown() {
+    if (loadingTimer) {
+      clearInterval(loadingTimer);
+      loadingTimer = null;
+    }
   }
-}
 
-
-
-
-
+})();
