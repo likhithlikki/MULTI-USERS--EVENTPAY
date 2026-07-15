@@ -318,14 +318,12 @@ function init() {
   }
 
   function handlePaymentReturn() {
-var params = new URLSearchParams(window.location.search);
-var status = params.get("paymentStatus");
-
-if (!status) return false;
+  var params = new URLSearchParams(window.location.search);
+  var status = params.get("paymentStatus");
+  if (!status) return false;
 
   window.history.replaceState({}, document.title, window.location.pathname);
 
-  // Read the stash BEFORE deleting it, and restore it into the form.
   var stashed = {};
   try { stashed = JSON.parse(sessionStorage.getItem("ep_pending_plan") || "{}"); } catch (e) {}
 
@@ -333,39 +331,13 @@ if (!status) return false;
   if (stashed.organizerPhone) document.getElementById("organizerPhone").value = stashed.organizerPhone;
   if (stashed.organizerEmail) document.getElementById("organizerEmail").value = stashed.organizerEmail;
   if (stashed.plan) {
-    state.plan = stashed.plan; // fallback used by collectFormData()
+    state.plan = stashed.plan;
     var radio = document.querySelector('input[name="plan"][value="' + stashed.plan + '"]');
     if (radio) radio.checked = true;
     updatePlanContinueBtn();
   }
-  state.otpVerified = true; // they already verified OTP before reaching Step 2
-var stashed = {};
-try {
-    stashed = JSON.parse(sessionStorage.getItem("ep_pending_plan") || "{}");
-} catch (e) {}
+  state.otpVerified = true;
 
-if (stashed.organizerName)
-    document.getElementById("organizerName").value = stashed.organizerName;
-
-if (stashed.organizerPhone)
-    document.getElementById("organizerPhone").value = stashed.organizerPhone;
-
-if (stashed.organizerEmail)
-    document.getElementById("organizerEmail").value = stashed.organizerEmail;
-
-if (stashed.plan) {
-    state.plan = stashed.plan;
-
-    var radio = document.querySelector(
-        'input[name="plan"][value="' + stashed.plan + '"]'
-    );
-
-    if (radio)
-        radio.checked = true;
-
-    updatePlanContinueBtn();
-}
-    
   sessionStorage.removeItem("ep_pending_plan");
   sessionStorage.removeItem("eventpay_pending_application");
 
@@ -380,9 +352,9 @@ if (stashed.plan) {
     resetPlanSelection();
     showToast("Payment Failed. Please select a plan to try again.");
   }
-    return true;
-}
 
+  return true;
+}
   function collectFormData() {
     var eventType = getSelectedEventType();
     var data = {
