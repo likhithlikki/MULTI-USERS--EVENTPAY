@@ -2,745 +2,397 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<script>(function(){const t=localStorage.getItem('ep_theme')||'dark';document.documentElement.setAttribute('data-theme',t)})();</script>
+<script>(function(){ const t=localStorage.getItem('theme')||'dark'; document.documentElement.setAttribute('data-theme',t); })();</script>
+<link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#6366f1">
-<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
-<title>EventPay — All Events</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Invitation</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <link rel="stylesheet" href="shared.css">
 <style>
-/* HERO */
-.hero{padding:60px 20px 48px;text-align:center;background:linear-gradient(145deg,#0b0f1a 0%,#111827 60%,#0b0f1a 100%);border-bottom:1px solid var(--border);position:relative;overflow:hidden}
-.hero::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse 70% 60% at 50% -10%,rgba(99,102,241,0.18),transparent)}
-[data-theme="light"] .hero{background:linear-gradient(145deg,#e8eeff,#f0f4ff)}
-[data-theme="light"] .hero::before{background:radial-gradient(ellipse 70% 60% at 50% -10%,rgba(99,102,241,0.1),transparent)}
-.hero-badge{display:inline-flex;align-items:center;gap:6px;padding:5px 14px;border-radius:20px;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.25);color:var(--accent);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:20px}
-.hero h1{font-size:clamp(26px,6vw,52px);font-weight:800;background:linear-gradient(135deg,var(--text) 0%,var(--accent) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:10px;letter-spacing:-1px;line-height:1.1}
-.hero p{color:var(--text-muted);font-size:15px;max-width:480px;margin:0 auto}
+/* INVITE CARD */
+.invite-card {
+  max-width: 480px; margin: 0 auto;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 24px; overflow: hidden;
+  box-shadow: var(--card-shadow);
+  animation: fadeInUp 0.5s ease both;
+}
+.invite-header {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  padding: 40px 28px 32px; text-align: center; position: relative;
+}
+.invite-header::after {
+  content: ''; position: absolute; bottom: -1px; left: 0; right: 0;
+  height: 30px;
+  background: url("data:image/svg+xml,%3Csvg viewBox='0 0 1440 30' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 30h1440V0c-240 24-480 30-720 30S240 24 0 0v30z' fill='var(--bg)'/%3E%3C/svg%3E");
+  background-size: cover;
+}
+.invite-emoji { font-size: 44px; margin-bottom: 12px; }
+.invite-label { font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.7); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 8px; }
+.invite-event-name { font-size: clamp(22px,5vw,32px); font-weight: 800; color: #fff; line-height: 1.2; text-shadow: 0 2px 10px rgba(0,0,0,0.3); }
+.invite-subtitle { font-size: 14px; color: rgba(255,255,255,0.8); margin-top: 6px; }
 
-/* HERO CTA */
-.hero-cta{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:24px;position:relative}
-.hero-cta-btn{display:inline-flex;align-items:center;gap:7px;padding:11px 22px;border-radius:12px;font-size:13px;font-weight:700;text-decoration:none;transition:all .2s;border:1.5px solid transparent}
-.hero-cta-btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;box-shadow:0 6px 20px var(--accent-glow)}
-.hero-cta-btn.primary:hover{transform:translateY(-2px);box-shadow:0 10px 28px var(--accent-glow)}
-.hero-cta-btn.secondary{background:var(--surface);color:var(--text);border-color:var(--border2)}
-.hero-cta-btn.secondary:hover{border-color:var(--accent);color:var(--accent);transform:translateY(-2px)}
+/* INVITE BODY */
+.invite-body { padding: 28px 24px 20px; }
+.invite-detail {
+  display: flex; align-items: flex-start; gap: 14px;
+  padding: 14px; background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 14px; margin-bottom: 10px;
+}
+.invite-detail-icon { font-size: 22px; flex-shrink: 0; margin-top: 2px; }
+.invite-detail-content { flex: 1; }
+.invite-detail-label { font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 4px; }
+.invite-detail-value { font-size: 15px; font-weight: 700; color: var(--text); line-height: 1.4; }
 
-/* NAV: Apply link stands out slightly from the plain nav links */
-.nav-link.apply-link{display:inline-flex;align-items:center;gap:5px;padding:6px 14px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff!important;font-weight:700}
-.nav-link.apply-link:hover{opacity:.92}
-.nav-link.qr-scan-link{display:inline-flex;align-items:center;gap:5px;padding:6px 14px;border-radius:10px;border:1.5px solid var(--border2);cursor:pointer}
-.nav-link.qr-scan-link:hover{border-color:var(--accent);color:var(--accent)}
+/* INVITATION CARD IMAGE */
+.invite-card-image {
+  max-width: 480px; margin: 0 auto 16px;
+  border-radius: 16px; overflow: hidden;
+  border: 1px solid var(--border); box-shadow: var(--card-shadow);
+}
+.invite-card-image img { width: 100%; display: block; }
+.invite-card-image iframe { width: 100%; height: 300px; border: none; display: block; }
 
-/* SEARCH */
-.search-wrap{max-width:520px;margin:32px auto 0;padding:0 16px;position:relative}
-.search-input{width:100%;padding:14px 48px 14px 18px;border-radius:14px;border:1.5px solid var(--border2);background:var(--surface);color:var(--text);font-family:'Sora',sans-serif;font-size:14px;transition:all .2s;box-sizing:border-box;box-shadow:0 4px 20px rgba(0,0,0,0.2)}
-.search-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
-.search-icon{position:absolute;right:32px;top:50%;transform:translateY(-50%);font-size:16px;pointer-events:none;color:var(--text-dim)}
+/* MAP */
+.map-card {
+  max-width: 480px; margin: 0 auto 16px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; overflow: hidden; box-shadow: var(--card-shadow);
+}
+.map-embed { width: 100%; height: 220px; border: none; display: block; }
+.map-footer { padding: 14px 18px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.map-address { flex: 1; font-size: 13px; color: var(--text-muted); line-height: 1.4; min-width: 0; }
+.map-open-btn {
+  display: flex; align-items: center; gap: 6px; padding: 10px 16px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: white; border: none; border-radius: 10px; cursor: pointer;
+  font-family: 'Sora', sans-serif; font-size: 13px; font-weight: 700;
+  white-space: nowrap; text-decoration: none; transition: all 0.2s; flex-shrink: 0;
+}
+.map-open-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px var(--accent-glow); }
 
-/* FILTER TABS */
-.filter-tabs{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin:16px 0 24px;padding:0 16px}
-.ftab{padding:7px 16px;border-radius:20px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-muted);font-size:12px;font-weight:700;cursor:pointer;transition:all .2s}
-.ftab.active,.ftab:hover{border-color:var(--accent);color:var(--accent);background:rgba(99,102,241,.09)}
+/* QR CODE */
+.qr-card {
+  max-width: 480px; margin: 0 auto 16px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; padding: 20px; text-align: center;
+  box-shadow: var(--card-shadow);
+}
+.qr-card h3 { font-size: 14px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 14px; }
+.qr-wrap { display: inline-block; padding: 12px; background: white; border-radius: 12px; }
+.qr-hint { font-size: 12px; color: var(--text-dim); margin-top: 10px; }
 
-/* EVENTS GRID */
-.events-section{max-width:1000px;margin:0 auto;padding:0 16px 60px}
-.events-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:16px}
+/* SHARE BUTTONS */
+.share-row { max-width: 480px; margin: 0 auto 16px; display: flex; gap: 8px; flex-wrap: wrap; }
+.share-btn {
+  flex: 1; min-width: 100px; padding: 11px 14px; border-radius: 12px;
+  border: 1.5px solid var(--border2); background: var(--surface);
+  color: var(--text); font-family: 'Sora', sans-serif; font-size: 13px; font-weight: 700;
+  cursor: pointer; transition: all 0.2s; text-align: center;
+}
+.share-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(99,102,241,0.08); transform: translateY(-2px); }
 
-/* EVENT CARD */
-.event-card{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:22px;cursor:pointer;transition:all .25s;position:relative;overflow:hidden;animation:fadeInUp .4s ease both}
-.event-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--accent),var(--accent2));opacity:0;transition:opacity .25s}
-.event-card:hover{border-color:var(--accent);transform:translateY(-3px);box-shadow:0 12px 40px rgba(99,102,241,0.15)}
-.event-card:hover::before{opacity:1}
-.event-card.wedding::before{background:linear-gradient(90deg,#ec4899,#f43f5e)}
-.event-card.birthday::before{background:linear-gradient(90deg,#f59e0b,#ef4444)}
-.event-card.temple::before{background:linear-gradient(90deg,#f97316,#eab308)}
-.event-card.housewarming::before{background:linear-gradient(90deg,#10b981,#06b6d4)}
+/* DISABLED */
+.disabled-page { text-align: center; padding: 80px 20px; }
 
-.ec-type-badge{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:20px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px}
-.type-wedding{background:rgba(236,72,153,.12);color:#f472b6;border:1px solid rgba(236,72,153,.25)}
-.type-birthday{background:rgba(245,158,11,.12);color:#fbbf24;border:1px solid rgba(245,158,11,.25)}
-.type-temple{background:rgba(249,115,22,.12);color:#fb923c;border:1px solid rgba(249,115,22,.25)}
-.type-housewarming{background:rgba(16,185,129,.12);color:#34d399;border:1px solid rgba(16,185,129,.25)}
-.type-other{background:rgba(100,116,139,.12);color:#94a3b8;border:1px solid rgba(100,116,139,.25)}
-
-.ec-title{font-size:16px;font-weight:800;margin-bottom:4px;line-height:1.3;padding-right:70px}
-.ec-subtitle{font-size:12px;color:var(--text-muted);margin-bottom:14px}
-.ec-code{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-dim);margin-bottom:14px;display:flex;align-items:center;gap:6px}
-.ec-code-badge{padding:2px 8px;border-radius:6px;background:var(--surface2);border:1px solid var(--border);letter-spacing:1px}
-.ec-footer{display:flex;align-items:center;justify-content:space-between;gap:8px}
-.ec-organizer{font-size:11px;color:var(--text-dim);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ec-go-btn{display:flex;align-items:center;gap:5px;padding:7px 14px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:white;border:none;font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;white-space:nowrap;flex-shrink:0}
-.ec-go-btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px var(--accent-glow)}
-.ec-qr-btn{width:32px;height:32px;border-radius:10px;border:1.5px solid var(--border2);background:var(--surface);color:var(--text);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;font-size:15px;transition:all .2s}
-.ec-qr-btn:hover{border-color:var(--accent);color:var(--accent);background:rgba(99,102,241,.08)}
-
-/* STATUS BADGE (real active/inactive indicator, top-right of card) */
-.ec-status-badge{position:absolute;top:16px;right:16px;font-size:10px;font-weight:800;padding:3px 9px;border-radius:20px;background:var(--surface2);border:1px solid var(--border);white-space:nowrap}
-.ec-status-badge.is-active{color:#34d399}
-.ec-status-badge.is-inactive{color:#f87171}
-
-/* STATUS DOT (kept for the type badge) */
-.status-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
-.status-dot.active{background:var(--success);box-shadow:0 0 0 3px rgba(16,185,129,.2)}
-.status-dot.inactive{background:var(--text-dim)}
-
-/* STATS BAR */
-.stats-bar{display:flex;flex-wrap:wrap;gap:1px;background:var(--border);border-radius:16px;overflow:hidden;margin-bottom:28px;border:1px solid var(--border)}
-.stat-item{flex:1 1 110px;padding:16px;text-align:center;background:var(--surface)}
-.stat-val{font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:800;color:var(--accent);margin-bottom:3px}
-.stat-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-dim)}
-.stat-item.stat-active .stat-val{color:#34d399}
-.stat-item.stat-inactive .stat-val{color:#f87171}
-
-/* EMPTY */
-.no-events{text-align:center;padding:60px 20px;color:var(--text-muted)}
-.no-events .icon{font-size:52px;margin-bottom:16px}
-.no-events h3{font-size:18px;font-weight:800;margin-bottom:8px}
-
-/* SKELETON */
-.skeleton-card{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:22px}
-.skel-row{height:12px;border-radius:6px;margin-bottom:10px}
-.skel-short{width:40%}
-
-/* SECTION TITLE */
-.section-title{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:var(--text-dim);margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid var(--border)}
-
-/* QR READER */
-#qrReader{border-radius:14px;overflow:hidden}
-#qrReader video{border-radius:14px}
+/* LOADING SKELETON */
+.skeleton-card { max-width:480px; margin:24px auto; background:var(--surface); border:1px solid var(--border); border-radius:24px; padding:28px; }
+.sk { height:20px; border-radius:8px; margin-bottom:14px; background:linear-gradient(90deg,var(--surface) 25%,var(--surface2) 50%,var(--surface) 75%); background-size:200% 100%; animation:shimmer 1.5s infinite; }
+@keyframes shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
 </style>
 </head>
 <body>
 
 <nav class="navbar">
-  <div class="nav-logo" onclick="window.location.reload()">⚡ EventPay</div>
+  <div class="nav-logo" id="navEventName">EventPay</div>
   <div class="nav-links">
-    <a href="index.html" class="nav-link active">All Events</a>
-    <a href="apply-event.html" class="nav-link apply-link">➕ Apply for Event</a>
-    <a href="#" class="nav-link qr-scan-link" id="scanQrBtn">📷 Scan QR</a>
-   <a href="master-admin-login.html" class="nav-link" id="masterAdminBtn">
-    <i class="fas fa-user-shield"></i>
-    Master Admin
-</a>
+    <a href="home.html" class="nav-link">Home</a>
+    <a href="invite.html" class="nav-link active">Invitation</a>
+    <a href="status.html" class="nav-link">Status</a>
+    <a href="complaint.html" class="nav-link">Complaint</a>
+    <button class="theme-toggle-btn" id="themeToggle" onclick="toggleTheme()">☀️ Light</button>
   </div>
-  <div class="nav-right">
-    <button class="theme-btn" id="themeBtn" onclick="toggleTheme()">🌙</button>
-    <button class="hamburger" onclick="toggleMobileMenu()">☰</button>
-  </div>
+  <button class="hamburger" onclick="toggleNav()">☰</button>
 </nav>
-<div class="mobile-menu" id="mobileMenu">
-  <a href="index.html">⚡ All Events</a>
-  <a href="apply-event.html">➕ Apply for Event</a>
-  <a href="#" id="scanQrBtnMobile">📷 Scan QR</a>
-<a href="master-admin-login.html" class="nav-link">
-    Master Admin
-</a>
+<div class="nav-mobile" id="navMobile">
+  <a href="home.html">🏠 Home</a>
+  <a href="invite.html">💌 Invitation</a>
+  <a href="gallery.html">📸 Gallery</a>
+  <a href="donors.html">👥 Donors</a>
+  <a href="status.html">🔍 Status</a>
+  <a href="complaint.html">📋 Complaint</a>
 </div>
 
-<!-- HERO -->
-<div class="hero">
-  <div class="hero-badge">🎉 Event Contribution Platform</div>
-  <h1>EventPay</h1>
-  <p>Select your event to contribute, view donors, or check your payment status</p>
-  <div class="hero-cta">
-    <a href="apply-event.html" class="hero-cta-btn primary">➕ Apply for Event</a>
-    <a href="#eventsLabel" class="hero-cta-btn secondary" onclick="document.getElementById('searchBox').focus()">🔍 Browse Events</a>
+<!-- DISABLED STATE -->
+<div id="disabledPage" class="page-content" style="display:none">
+  <div class="disabled-page">
+    <div style="font-size:64px;margin-bottom:20px">🔒</div>
+    <h2 style="font-size:22px;font-weight:800;margin-bottom:10px;color:var(--text-muted)">Not Available</h2>
+    <p style="color:var(--text-dim);font-size:14px">The invitation is not available yet. Please check back later.</p>
+    <a href="home.html" class="btn-primary" style="display:inline-flex;text-decoration:none;margin-top:24px">← Back to Home</a>
   </div>
 </div>
 
-<!-- SEARCH -->
-<div class="search-wrap" style="max-width:520px;margin:32px auto 0;padding:0 16px;position:relative">
-  <input class="search-input" id="searchBox" type="text" placeholder="🔍  Search events by name, couple, organizer..." oninput="filterEvents(this.value)">
-</div>
-
-<!-- FILTER TABS -->
-<div class="filter-tabs" id="filterTabs">
-  <button class="ftab active" onclick="setFilter('',this)">All</button>
-  <button class="ftab" onclick="setFilter('active',this)">🟢 Active</button>
-  <button class="ftab" onclick="setFilter('inactive',this)">🔴 Inactive</button>
-  <button class="ftab" onclick="setFilter('wedding',this)">💍 Weddings</button>
-  <button class="ftab" onclick="setFilter('birthday',this)">🎂 Birthdays</button>
-  <button class="ftab" onclick="setFilter('temple',this)">🕌 Temple</button>
-  <button class="ftab" onclick="setFilter('housewarming',this)">🏠 Housewarming</button>
-  <button class="ftab" onclick="setFilter('other',this)">📅 Other</button>
+<!-- SKELETON LOADING -->
+<div id="loadingSkeleton" class="page-content">
+  <div class="skeleton-card">
+    <div class="sk" style="height:30px;width:60%;margin:0 auto 20px"></div>
+    <div class="sk" style="height:16px;width:80%;margin:0 auto 10px"></div>
+    <div class="sk" style="height:16px;width:70%;margin:0 auto 20px"></div>
+    <div class="sk" style="height:60px"></div>
+    <div class="sk" style="height:60px"></div>
+    <div class="sk" style="height:200px;margin-top:10px"></div>
+  </div>
 </div>
 
 <!-- MAIN CONTENT -->
-<div class="events-section">
-  <!-- STATS BAR -->
-  <div class="stats-bar" id="statsBar" style="display:none">
-    <div class="stat-item"><div class="stat-val" id="statTotal">0</div><div class="stat-lbl">Total Events</div></div>
-    <div class="stat-item stat-active"><div class="stat-val" id="statActive">0</div><div class="stat-lbl">Active</div></div>
-    <div class="stat-item stat-inactive"><div class="stat-val" id="statInactive">0</div><div class="stat-lbl">Inactive</div></div>
-    <div class="stat-item"><div class="stat-val" id="statWed">0</div><div class="stat-lbl">Weddings</div></div>
-    <div class="stat-item"><div class="stat-val" id="statBirthday">0</div><div class="stat-lbl">Birthdays</div></div>
-    <div class="stat-item"><div class="stat-val" id="statHousewarming">0</div><div class="stat-lbl">Housewarming</div></div>
-    <div class="stat-item"><div class="stat-val" id="statTemple">0</div><div class="stat-lbl">Temple</div></div>
-    <div class="stat-item"><div class="stat-val" id="statOther">0</div><div class="stat-lbl">Other</div></div>
-  </div>
+<div id="mainContent" style="display:none">
+  <!-- INVITATION CARD IMAGE (from Settings InviteCardURL) -->
+  <div class="page-content" style="padding-top:24px">
 
-  <div class="section-title" id="eventsLabel">Loading events...</div>
-  <div class="events-grid" id="eventsGrid">
-    <!-- Skeletons -->
-    <div class="skeleton-card"><div class="skel-row skeleton skel-short"></div><div class="skel-row skeleton"></div><div class="skel-row skeleton" style="width:70%"></div><div class="skel-row skeleton skel-short"></div></div>
-    <div class="skeleton-card"><div class="skel-row skeleton skel-short"></div><div class="skel-row skeleton"></div><div class="skel-row skeleton" style="width:60%"></div><div class="skel-row skeleton skel-short"></div></div>
-    <div class="skeleton-card"><div class="skel-row skeleton skel-short"></div><div class="skel-row skeleton"></div><div class="skel-row skeleton" style="width:80%"></div><div class="skel-row skeleton skel-short"></div></div>
-  </div>
-  <div class="no-events" id="noEvents" style="display:none">
-    <div class="icon">🔍</div>
-    <h3>No events found</h3>
-    <button id="refreshEventsBtn">
-    🔄 Refresh Events
-</button>
-    <p>Try a different search term or filter.</p>
-    <div style="margin-top:18px">
-      <a href="apply-event.html" class="hero-cta-btn primary" style="display:inline-flex">➕ Apply for Event</a>
+    <div class="invite-card" id="inviteCard">
+      <div class="invite-header">
+        <div class="invite-emoji">💍</div>
+        <div class="invite-label">You are cordially invited to</div>
+        <div class="invite-event-name" id="inviteEventName">Event Name</div>
+        <div class="invite-subtitle" id="inviteSubtitle">Join us for this special occasion</div>
+      </div>
+      <div class="invite-body">
+        <div class="invite-detail" id="inviteDateRow" style="display:none">
+          <div class="invite-detail-icon">📅</div>
+          <div class="invite-detail-content">
+            <div class="invite-detail-label">Date & Time</div>
+            <div class="invite-detail-value" id="inviteDateTime">—</div>
+          </div>
+        </div>
+        <div class="invite-detail" id="inviteVenueRow" style="display:none">
+          <div class="invite-detail-icon">📍</div>
+          <div class="invite-detail-content">
+            <div class="invite-detail-label">Venue</div>
+            <div class="invite-detail-value" id="inviteVenue">—</div>
+          </div>
+        </div>
+        <div class="invite-detail" id="inviteOrganizerRow" style="display:none">
+          <div class="invite-detail-icon">🙏</div>
+          <div class="invite-detail-content">
+            <div class="invite-detail-label">Organizer</div>
+            <div class="invite-detail-value" id="inviteOrganizer">—</div>
+          </div>
+        </div>
+        <div class="invite-detail">
+          <div class="invite-detail-icon">💰</div>
+          <div class="invite-detail-content">
+            <div class="invite-detail-label">Contribute Online</div>
+            <div class="invite-detail-value" style="font-size:13px;color:var(--text-muted)">Scan QR code below or tap "Pay Now"</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- INVITE CARD IMAGE (from InviteCardURL setting) -->
+    <div class="invite-card-image" id="inviteImageCard" style="display:none">
+      <img id="inviteImage" src="" alt="Invitation Card" loading="lazy"
+           onerror="this.parentElement.style.display='none'"
+           style="cursor:pointer" onclick="openInviteImage()">
+      <div style="text-align:center;padding:10px;background:var(--surface2);font-size:11px;color:var(--text-dim)">
+        Tap to view full invitation card
+      </div>
+    </div>
+
+    <!-- PDF INVITE CARD -->
+    <div class="invite-card-image" id="invitePDFCard" style="display:none">
+      <iframe id="invitePDF" src="" title="Invitation Card"></iframe>
+      <div style="text-align:center;padding:10px;background:var(--surface2)">
+        <a class="text-link" id="invitePDFLink" href="" target="_blank" style="font-size:13px">📥 Download Invitation Card</a>
+      </div>
+    </div>
+
+    <!-- VENUE MAP -->
+    <div class="map-card" id="mapCard" style="display:none">
+      <iframe id="mapEmbed" class="map-embed" allowfullscreen loading="lazy"
+              referrerpolicy="no-referrer-when-downgrade" src=""></iframe>
+      <div class="map-footer">
+        <div class="map-address" id="mapAddress"></div>
+        <a class="map-open-btn" id="mapOpenBtn" href="" target="_blank" rel="noopener">
+          🗺️ Open Maps
+        </a>
+      </div>
+    </div>
+
+    <!-- QR CODE TO APP -->
+    <div class="qr-card">
+      <h3>📲 Contribute Online</h3>
+      <div class="qr-wrap"><div id="qrcode"></div></div>
+      <div class="qr-hint">Scan to open the contribution page</div>
+    </div>
+
+    <!-- SHARE BUTTONS -->
+    <div class="share-row">
+      <button class="share-btn" onclick="shareWhatsApp()">📱 WhatsApp</button>
+      <button class="share-btn" onclick="copyLink()">🔗 Copy Link</button>
+      <button class="share-btn" onclick="nativeShare()">📤 Share</button>
+    </div>
+
+    <div style="text-align:center;margin-top:8px">
+      <a href="home.html" class="btn-primary" style="display:inline-flex;text-decoration:none">💰 Make a Contribution</a>
     </div>
   </div>
 </div>
 
-<footer class="footer">
-  <p>⚡ EventPay v4.0 — Multi-Event Contribution Platform · <a href="apply-event.html">Apply for Event</a> · <a href="admin-login.html">Admin</a></p>
-</footer>
+<footer class="footer"><p>With love & blessings 🙏</p></footer>
 <div class="toast-container" id="toastContainer"></div>
 
-<!-- EVENT LOADING OVERLAY — shown while selectEventAndLoad() preloads
-     Settings/Gallery/Villages for the chosen event before navigating to
-     home.html. Nothing else on the page is clickable while this is up. -->
-<div id="eventLoadOverlay" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(11,15,26,0.92);backdrop-filter:blur(4px);align-items:center;justify-content:center;flex-direction:column;gap:18px;">
-  <div style="width:44px;height:44px;border:3px solid rgba(99,102,241,0.25);border-top-color:var(--accent);border-radius:50%;animation:eventLoadSpin .8s linear infinite;"></div>
-  <div id="eventLoadLabel" style="color:#fff;font-family:'Sora',sans-serif;font-size:14px;font-weight:600;">Selecting event...</div>
-  <div style="width:220px;height:4px;border-radius:4px;background:rgba(255,255,255,0.12);overflow:hidden;">
-    <div id="eventLoadBar" style="height:100%;width:10%;border-radius:4px;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .3s ease;"></div>
-  </div>
-</div>
-<style>@keyframes eventLoadSpin{to{transform:rotate(360deg)}}</style>
-
-<!-- QR SCANNER MODAL -->
-<div id="qrScannerModal" class="modal-overlay">
-  <div class="modal-box" style="max-width:420px;">
-    <div class="modal-header">
-      <div class="modal-title">📷 Scan Event QR</div>
-      <button class="modal-close" onclick="closeQRScanner()">✕</button>
-    </div>
-    <div id="qrReader" style="width:100%;min-height:260px;"></div>
-    <div id="qrScanStatus" style="margin-top:14px;font-size:13px;color:var(--text-muted);text-align:center;">Point your camera at an event QR code…</div>
-  </div>
-</div>
-
-<!-- QR GENERATOR MODAL -->
-<div id="qrGenModal" class="modal-overlay">
-  <div class="modal-box" style="max-width:360px;text-align:center;">
-    <div class="modal-header">
-      <div class="modal-title">Event QR Code</div>
-      <button class="modal-close" onclick="closeQRGen()">✕</button>
-    </div>
-    <div id="qrGenCanvas" style="display:flex;justify-content:center;align-items:center;margin:10px 0;min-height:220px;"></div>
-    <div id="qrGenEventName" style="font-weight:700;margin-bottom:16px;font-size:14px;"></div>
-    <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
-      <button class="btn-primary btn-sm" onclick="downloadQR()">⬇ Download PNG</button>
-      <button class="btn-outline btn-sm" onclick="printQR()">🖨 Print</button>
-      <button class="btn-outline btn-sm" onclick="shareQR()">📤 Share</button>
-    </div>
-  </div>
-</div>
-
 <script src="config.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <script>
+if (!requireEvent()) { /* redirected — no event selected */ }
 
-async function resetEventPayCache() {
+const pageURL = window.location.origin + window.location.pathname.replace('invite.html','index.html');
 
-    console.log("🧹 Clearing previous Event cache...");
+Promise.all([
+  getEventSettingsCached().catch(()=>({})),
+  fetch(APP_CONFIG.SCRIPT_URL+"?action=getPublicVisibility").then(r=>r.json()).catch(()=>({showInviteCard:true}))
+]).then(([s, vis])=>{
+  document.getElementById("loadingSkeleton").style.display="none";
 
-    const keys = [
+  // VISIBILITY CHECK
+  if(vis.showInviteCard===false){
+    document.getElementById("disabledPage").style.display="block"; return;
+  }
 
-        "ep_event_obj",
+  document.getElementById("mainContent").style.display="block";
 
-        APP_CONFIG.LS.SELECTED_EID,
+  // These keys match what the Event Spreadsheet's Settings sheet
+  // actually stores (getSettings() on the backend aliases "Event Name"
+  // <-> "EventName", "ORG_NAME" <-> "OrganizerName", and
+  // "INVITATION_CARD_DRIVE_LINK" <-> "InviteCardURL", so either spelling
+  // works, but we read the canonical ones here for clarity).
+  const eventName=s.EventName||"Event";
+  const eventDate=s.EventDate||""; const eventTime=s.EventTime||"";
+  const venueAddr=s.VenueAddress||""; const venueMap=s.VenueMapLink||"";
+  const inviteURL=s.INVITATION_CARD_DRIVE_LINK||s.InviteCardURL||"";
+  const orgName=s.ORG_NAME||s.OrganizerName||"";
 
-        APP_CONFIG.LS.SELECTED_EURL,
+  // Update nav + title
+  document.getElementById("navEventName").textContent=eventName;
+  document.title="Invitation — "+eventName;
 
-        APP_CONFIG.LS.SELECTED_ENAME,
+  // Invite card
+  document.getElementById("inviteEventName").textContent=eventName;
+  if(orgName) document.getElementById("inviteSubtitle").textContent="Hosted by "+orgName;
 
-        "ep_settings_cache",
+  // Date + time
+  // Date + Time Formatting
+if (eventDate || eventTime) {
+  document.getElementById("inviteDateRow").style.display = "flex";
 
-        "ep_gallery_cache",
+  let formattedDate = "";
+  let formattedTime = "";
 
-        "ep_village_cache",
-
-        "ep_visibility_cache",
-
-        "ep_publicstats_cache",
-
-        "ep_recent_cache"
-
-    ];
-
-    keys.forEach(k=>{
-        localStorage.removeItem(k);
-        sessionStorage.removeItem(k);
+  if (eventDate) {
+    const d = new Date(eventDate);
+    formattedDate = d.toLocaleDateString("en-IN", {
+      day: "numeric",
+      month: "long",
+      year: "numeric"
     });
-
-    if("caches" in window){
-        await caches.delete("eventpay-v4");
-    }
-
-    console.log("✅ Event cache cleared.");
-
-}
-
-    // Clear Cache Storage
-
-
-    // Unregister all Service Workers
-  
-
-  
-// ============================================================
-// MASTER DB CONFIG
-// Replace with your MASTER_DB Apps Script deployed URL
-// ============================================================
-// fallback for dev: hardcode if needed
-// const MASTER_API = "https://script.google.com/macros/s/XXXX/exec";
-
-let allEvents = [], activeFilter = "";
-
-// ============================================================
-// CATEGORY / STATUS CLASSIFICATION — single source of truth used by
-// BOTH the statistics bar and the filter tabs, so the two can never
-// disagree with each other again.
-// ============================================================
-function isEventActive(ev) {
-  // Missing/blank Status is treated as Active (matches the rest of the
-  // app, e.g. selectEvent()'s own inactive check), but anything that is
-  // explicitly NOT "active" counts as Inactive.
-  return String(ev.Status || "Active").trim().toLowerCase() === "active";
-}
-
-function getEventCategory(ev) {
-  // Normalize away spacing/casing differences ("House Warming" vs
-  // "Housewarming", "Marriage" vs "Wedding", "Temple Festival" vs
-  // "Temple", etc.) so every event lands in exactly one bucket.
-  const type = String(ev.EventType || "").trim().toLowerCase().replace(/\s+/g, "");
-  if (type === "marriage" || type === "wedding") return "wedding";
-  if (type === "birthday") return "birthday";
-  if (type === "housewarming") return "housewarming";
-  if (type === "temple" || type === "templefestival") return "temple";
-  return "other";
-}
-
-const CATEGORY_ICON = { wedding: "💍", birthday: "🎂", temple: "🕌", housewarming: "🏠", other: "📅" };
-
-// ---- LOAD EVENTS ----
-async function loadEvents() {
-  try {
-    const data = await api("getEvents");
-    allEvents = data.events || [];
-
-    // Statistics are computed exactly ONCE here, straight from the
-    // freshly loaded event records — never recomputed during filtering.
-    updateStatsBar(allEvents);
-
-    renderEvents(allEvents);
-  } catch(e) {
-    document.getElementById("eventsGrid").innerHTML = "";
-    document.getElementById("eventsLabel").textContent = "Could not load events";
-    document.getElementById("noEvents").style.display = "block";
-    document.querySelector(".no-events .icon").textContent = "⚠️";
-    document.querySelector(".no-events h3").textContent = "Connection Error";
-    document.querySelector(".no-events p").textContent  = "Check your MASTER_API URL in config.js. " + e.message;
   }
-}
 
-// ============================================================
-// STATISTICS — Total / Active / Inactive / per-category, all derived
-// directly from the actual event records (nothing hardcoded).
-//   Total     = Active + Inactive
-//   Active    = Status == "Active"
-//   Inactive  = Status != "Active"
-//   Wedding   = EventType is "Marriage" or "Wedding"
-//   Birthday  = EventType is "Birthday"
-//   Housewarming = EventType is "Housewarming" / "House Warming"
-//   Temple    = EventType is "Temple" / "Temple Festival"
-//   Other     = anything else
-// ============================================================
-function updateStatsBar(events) {
-  const s = { total: events.length, active: 0, inactive: 0, wedding: 0, birthday: 0, housewarming: 0, temple: 0, other: 0 };
-
-  events.forEach(ev => {
-    if (isEventActive(ev)) s.active++; else s.inactive++;
-    s[getEventCategory(ev)]++;
-  });
-
-  document.getElementById("statTotal").textContent        = s.total;
-  document.getElementById("statActive").textContent       = s.active;
-  document.getElementById("statInactive").textContent     = s.inactive;
-  document.getElementById("statWed").textContent           = s.wedding;
-  document.getElementById("statBirthday").textContent      = s.birthday;
-  document.getElementById("statHousewarming").textContent  = s.housewarming;
-  document.getElementById("statTemple").textContent        = s.temple;
-  document.getElementById("statOther").textContent         = s.other;
-  document.getElementById("statsBar").style.display = events.length ? "flex" : "none";
-}
-
-function renderEvents(list) {
-  const grid = document.getElementById("eventsGrid");
-  const label= document.getElementById("eventsLabel");
-  const noEv = document.getElementById("noEvents");
-  grid.innerHTML = "";
-  if (!list.length) {
-    noEv.style.display = "block";
-    label.textContent = "0 events";
-    return;
-  }
-  noEv.style.display = "none";
-  label.textContent = list.length + " event" + (list.length !== 1 ? "s" : "");
-
-  list.forEach((ev, i) => {
-    const category = getEventCategory(ev);
-    const isActive = isEventActive(ev);
-    const typeIcon = CATEGORY_ICON[category] || "📅";
-
-    // Build names display
-    let subtitle = "";
-    if (ev.BrideName && ev.GroomName) subtitle = ev.GroomName + " 🤝 " + ev.BrideName;
-    else if (ev.BrideName || ev.GroomName) subtitle = ev.BrideName || ev.GroomName;
-    else if (ev.OrganizerName) subtitle = "by " + ev.OrganizerName;
-
-    const evEncoded = encodeURIComponent(JSON.stringify(ev));
-
-    const card = document.createElement("div");
-    card.className = `event-card ${category}`;
-    card.style.animationDelay = Math.min(i * 0.05, 0.4) + "s";
-    card.innerHTML = `
-      <div class="ec-status-badge ${isActive ? 'is-active' : 'is-inactive'}">${isActive ? '🟢 Active' : '🔴 Inactive'}</div>
-      <div class="ec-type-badge type-${category}">
-        <span class="status-dot ${isActive?'active':'inactive'}"></span>
-        ${typeIcon} ${ev.EventType || "Event"}
-      </div>
-      <div class="ec-title">${sanitize(ev.EventName || "Unnamed Event")}</div>
-      ${subtitle ? `<div class="ec-subtitle">${sanitize(subtitle)}</div>` : ""}
-      ${ev.EventDate ? `<div class="ec-subtitle" style="margin-top:-8px">📅 ${ev.EventDate}</div>` : ""}
-      <div class="ec-code">
-        <span>Code:</span>
-        <span class="ec-code-badge">${sanitize(ev.EventCode || ev.EventID || "—")}</span>
-      </div>
-      <div class="ec-footer">
-        <div class="ec-organizer">👤 ${sanitize(ev.OrganizerName || "")}</div>
-        <button class="ec-qr-btn" onclick="showEventQR(event,'${evEncoded}')" title="Show QR code">▦</button>
-        <button class="ec-go-btn" onclick="selectEvent(event,'${evEncoded}')">
-          Enter →
-        </button>
-      </div>
-    `;
-    card.addEventListener("click", function(e) {
-      if (e.target.closest(".ec-go-btn") || e.target.closest(".ec-qr-btn")) return;
-      selectEvent(e, evEncoded);
+  if (eventTime) {
+    const t = new Date(eventTime);
+    formattedTime = t.toLocaleTimeString("en-IN", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true
     });
-    grid.appendChild(card);
-  });
-}
-
-// ============================================================
-// FILTERING — purely client-side over the already-loaded `allEvents`
-// array. No backend calls happen here, so filtering/searching is
-// instant and never re-fetches data.
-// ============================================================
-function filterEvents(q) {
-  const qL = (q || "").toLowerCase();
-  const filtered = allEvents.filter(ev => {
-    if (activeFilter === "active" && !isEventActive(ev)) return false;
-    if (activeFilter === "inactive" && isEventActive(ev)) return false;
-    if (activeFilter && activeFilter !== "active" && activeFilter !== "inactive") {
-      if (getEventCategory(ev) !== activeFilter) return false;
-    }
-    if (!qL) return true;
-    return [ev.EventName, ev.BrideName, ev.GroomName, ev.OrganizerName, ev.EventCode, ev.EventType]
-      .some(v => v && String(v).toLowerCase().includes(qL));
-  });
-  renderEvents(filtered);
-}
-
-function setFilter(type, btn) {
-  activeFilter = type;
-  document.querySelectorAll(".ftab").forEach(b => b.classList.remove("active"));
-  btn.classList.add("active");
-  filterEvents(document.getElementById("searchBox").value);
-}
-
-const EVENT_LOAD_STEPS = [
-  "Selecting event...", "Loading settings...", "Loading gallery...", "Loading villages...", "Done"
-];
-
-async function selectEvent(e, evEncoded) {
-  if (e && e.stopPropagation) e.stopPropagation();
-  const ev = JSON.parse(decodeURIComponent(evEncoded));
-
-  if (!isEventActive(ev)) {
-    toast("This event is currently inactive.", "warning"); return;
   }
 
-  const eid = ev.EventID || ev.EventCode;
-  const sid = ev.SpreadsheetID || "";
-  const ename = ev.EventName || "Event";
-console.log("========== EVENT SELECTED ==========");
-console.log("Event Object:", ev);
-console.log("Event Name:", ename);
-console.log("Event ID:", eid);
-console.log("Spreadsheet ID from Master DB:", sid);
-console.log("====================================");
-  if (!sid) {
-    toast("This event is missing its Spreadsheet ID — cannot open it.", "error");
-    return;
+  document.getElementById("inviteDateTime").textContent =
+    `${formattedDate}${formattedTime ? " at " + formattedTime : ""}`;
+}
+  // Venue
+  if(venueAddr){
+    document.getElementById("inviteVenueRow").style.display="flex";
+    document.getElementById("inviteVenue").textContent=venueAddr;
   }
 
-  // Store full event info for home page (unrelated to the sid/settings
-  // cache — this is just the registry row for display purposes).
-  await resetEventPayCache();
-    setSelectedEvent(eid, sid, ename);
-  setSelectedEvent(eid, sid, ename);
-  sessionStorage.setItem("ep_event_obj", JSON.stringify(ev));
-  sessionStorage.setItem(
-    "ep_event_cache_time",
-    Date.now()
-);
-
-
-  const overlay = document.getElementById("eventLoadOverlay");
-  const label = document.getElementById("eventLoadLabel");
-  const bar = document.getElementById("eventLoadBar");
-  overlay.style.display = "flex";
-
-  try {
-    await selectEventAndLoad(eid, sid, ename, (stepLabel) => {
-      label.textContent = stepLabel;
-      const idx = EVENT_LOAD_STEPS.indexOf(stepLabel);
-      const pct = idx >= 0 ? Math.round(((idx + 1) / EVENT_LOAD_STEPS.length) * 100) : 100;
-      bar.style.width = pct + "%";
-    });
-  } catch (err) {
-    // Preload is best-effort by design (see selectEventAndLoad) — even
-    // on an unexpected error here, the event is already selected, so
-    // proceed to home.html rather than stranding the user on this page.
+  // Organizer
+  if(orgName){
+    document.getElementById("inviteOrganizerRow").style.display="flex";
+    document.getElementById("inviteOrganizer").textContent=orgName;
   }
 
-  sessionStorage.setItem("ep_loading", "true");
- console.log("Navigating to home.html");
-console.log("Current SID:", getEventSID());
-  window.location.href = "home.html";
-  
-}
-  document.getElementById("refreshEventsBtn").onclick = async () => {
- await resetEventPayCache();
-    location.reload();
-
-};
-
-// ============================================================
-// QR GENERATOR — every event's card gets a QR button. Encodes the
-// event's PublicURL when available, otherwise falls back to its
-// EventCode/EventID so the scanner (below) can still resolve it.
-// ============================================================
-let currentQRDataUrl = null;
-let currentQREventName = "";
-
-function getEventQRValue(ev) {
-  return ev.PublicURL || ev.AdminURL && "" || ev.EventCode || ev.EventID || "";
-}
-
-function showEventQR(e, evEncoded) {
-  if (e && e.stopPropagation) e.stopPropagation();
-  const ev = JSON.parse(decodeURIComponent(evEncoded));
-  const qrValue = ev.PublicURL || ev.EventCode || ev.EventID || "";
-
-  if (!qrValue) {
-    toast("This event has no code or URL to generate a QR for.", "warning");
-    return;
-  }
-
-  currentQREventName = ev.EventName || "Event";
-  currentQRDataUrl = null;
-
-  document.getElementById("qrGenEventName").textContent =
-    currentQREventName + (ev.EventCode ? " (" + ev.EventCode + ")" : "");
-
-  const container = document.getElementById("qrGenCanvas");
-  container.innerHTML = "";
-
-  try {
-    new QRCode(container, {
-      text: qrValue,
-      width: 220,
-      height: 220,
-      colorDark: "#000000",
-      colorLight: "#ffffff",
-      correctLevel: QRCode.CorrectLevel.M
-    });
-  } catch (err) {
-    container.innerHTML = "<div style='color:var(--danger);font-size:13px;'>Could not generate QR code.</div>";
-  }
-
-  // qrcodejs renders async via <img>/<canvas> — grab the data URL once ready.
-  setTimeout(() => {
-    const img = container.querySelector("img");
-    const canvas = container.querySelector("canvas");
-    if (canvas) currentQRDataUrl = canvas.toDataURL("image/png");
-    else if (img && img.src) currentQRDataUrl = img.src;
-  }, 150);
-
-  document.getElementById("qrGenModal").classList.add("open");
-}
-
-function closeQRGen() {
-  document.getElementById("qrGenModal").classList.remove("open");
-}
-
-function downloadQR() {
-  if (!currentQRDataUrl) { toast("QR code is still rendering — try again in a moment.", "warning"); return; }
-  const a = document.createElement("a");
-  a.href = currentQRDataUrl;
-  a.download = (currentQREventName || "event").replace(/[^a-z0-9]+/gi, "_") + "_QR.png";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
-
-function printQR() {
-  if (!currentQRDataUrl) { toast("QR code is still rendering — try again in a moment.", "warning"); return; }
-  const w = window.open("", "_blank");
-  if (!w) { toast("Please allow pop-ups to print the QR code.", "warning"); return; }
-  w.document.write(
-    "<html><head><title>" + sanitize(currentQREventName) + " — QR Code</title></head>" +
-    "<body style='text-align:center;padding:40px;font-family:sans-serif;'>" +
-    "<h2>" + sanitize(currentQREventName) + "</h2>" +
-    "<img src='" + currentQRDataUrl + "' style='width:300px;height:300px;'/>" +
-    "</body></html>"
-  );
-  w.document.close();
-  w.focus();
-  setTimeout(() => w.print(), 300);
-}
-
-async function shareQR() {
-  if (!currentQRDataUrl) { toast("QR code is still rendering — try again in a moment.", "warning"); return; }
-  try {
-    const res = await fetch(currentQRDataUrl);
-    const blob = await res.blob();
-    const file = new File([blob], "event-qr.png", { type: "image/png" });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({ files: [file], title: currentQREventName, text: "Scan to open " + currentQREventName });
+  // Invitation Card Image / PDF
+  if(inviteURL){
+    if(inviteURL.toLowerCase().includes(".pdf")||inviteURL.includes("pdf")){
+      document.getElementById("invitePDFCard").style.display="block";
+      document.getElementById("invitePDF").src=inviteURL;
+      document.getElementById("invitePDFLink").href=inviteURL;
     } else {
-      downloadQR();
-      toast("Sharing isn't supported on this device — downloaded the QR instead.", "info");
+      document.getElementById("inviteImageCard").style.display="block";
+      document.getElementById("inviteImage").src=inviteURL;
     }
-  } catch (err) {
-    toast("Could not share the QR code.", "error");
-  }
-}
-
-// ============================================================
-// QR SCANNER — opens the device camera, reads a QR containing an
-// Event ID, Event Code, or Event URL, then opens the matching event.
-// Works on both desktop (webcam) and mobile (rear camera preferred).
-// ============================================================
-let qrScannerInstance = null;
-let qrScannerRunning = false;
-
-function findEventByQRValue(text) {
-  const val = String(text || "").trim();
-  if (!val) return null;
-  return allEvents.find(ev => {
-    if (ev.EventCode && String(ev.EventCode).trim() === val) return true;
-    if (ev.EventID && String(ev.EventID).trim() === val) return true;
-    if (ev.PublicURL && val === String(ev.PublicURL).trim()) return true;
-    if (ev.PublicURL && val.indexOf(ev.PublicURL) !== -1) return true;
-    // URL containing "?event=CODE" or similar query params referencing the code
-    if (ev.EventCode && val.indexOf(ev.EventCode) !== -1) return true;
-    return false;
-  }) || null;
-}
-
-function onQRScanSuccess(decodedText) {
-  if (!qrScannerRunning) return; // guard against duplicate fires
-  stopQRScanner();
-  closeQRScanner();
-
-  const match = findEventByQRValue(decodedText);
-  if (match) {
-    toast("Event found — opening " + (match.EventName || "event") + "…", "success");
-    selectEvent(null, encodeURIComponent(JSON.stringify(match)));
-  } else {
-    toast("Event not found.", "error");
-  }
-}
-
-function openQRScanner(e) {
-  if (e && e.preventDefault) e.preventDefault();
-
-  if (typeof Html5Qrcode === "undefined") {
-    toast("QR scanner library failed to load. Check your internet connection.", "error");
-    return;
   }
 
-  document.getElementById("qrScannerModal").classList.add("open");
-  document.getElementById("qrScanStatus").textContent = "Requesting camera access…";
-
-  qrScannerInstance = new Html5Qrcode("qrReader");
-
-  Html5Qrcode.getCameras().then(cameras => {
-    if (!cameras || !cameras.length) {
-      document.getElementById("qrScanStatus").textContent = "No camera found on this device.";
-      return;
+  // Map embed
+  if(venueMap){
+    document.getElementById("mapCard").style.display="block";
+    document.getElementById("mapAddress").textContent=venueAddr||"View venue location";
+    document.getElementById("mapOpenBtn").href=venueMap;
+    // Google Maps embed URL
+    let embedSrc=venueMap;
+    if(venueMap.includes("maps.google.com")&&!venueMap.includes("/embed")){
+      const q=venueAddr||venueMap;
+      embedSrc="https://maps.google.com/maps?q="+encodeURIComponent(q)+"&output=embed";
     }
-    const rear = cameras.find(c => /back|rear|environment/i.test(c.label || ""));
-    const camId = rear ? rear.id : cameras[cameras.length - 1].id;
+    document.getElementById("mapEmbed").src=embedSrc;
+  }
 
-    qrScannerInstance.start(
-      camId,
-      { fps: 10, qrbox: { width: 240, height: 240 } },
-      onQRScanSuccess,
-      () => { /* per-frame scan failures are expected while aiming — ignore */ }
-    ).then(() => {
-      qrScannerRunning = true;
-      document.getElementById("qrScanStatus").textContent = "Point your camera at an event QR code…";
-    }).catch(err => {
-      document.getElementById("qrScanStatus").textContent = "Could not start camera: " + err;
-    });
-  }).catch(() => {
-    document.getElementById("qrScanStatus").textContent = "Camera access denied or unavailable on this device/browser.";
+  // QR Code
+  new QRCode(document.getElementById("qrcode"),{text:pageURL,width:160,height:160});
+}).catch(e=>{
+  document.getElementById("loadingSkeleton").style.display="none";
+  document.getElementById("mainContent").style.display="block";
+});
+
+function openInviteImage(){
+  const src=document.getElementById("inviteImage").src;
+  if(src) window.open(src,"_blank");
+}
+
+function shareWhatsApp(){
+  const msg="🎉 You are invited!\n\n"+document.getElementById("inviteEventName").textContent+"\n\n📍 "+
+    (document.getElementById("inviteVenue").textContent||"")+"\n\n💰 Contribute online: "+pageURL;
+  window.open("https://wa.me/?text="+encodeURIComponent(msg),"_blank");
+}
+function copyLink(){
+  navigator.clipboard.writeText(pageURL).then(()=>toast("Link copied!","success")).catch(()=>{
+    const ta=document.createElement("textarea"); ta.value=pageURL; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); toast("Link copied!","success");
   });
 }
-
-function stopQRScanner() {
-  if (qrScannerInstance && qrScannerRunning) {
-    qrScannerRunning = false;
-    qrScannerInstance.stop().then(() => qrScannerInstance.clear()).catch(() => {});
-  }
-  qrScannerInstance = null;
+function nativeShare(){
+  if(navigator.share){
+    navigator.share({title:document.getElementById("inviteEventName").textContent,url:pageURL}).catch(()=>{});
+  } else copyLink();
 }
 
-function closeQRScanner() {
-  document.getElementById("qrScannerModal").classList.remove("open");
-  stopQRScanner();
+function toggleNav(){document.getElementById("navMobile").classList.toggle("open");}
+function toggleTheme(){
+  const c=document.documentElement.getAttribute('data-theme')||'dark', n=c==='dark'?'light':'dark';
+  document.documentElement.setAttribute('data-theme',n); localStorage.setItem('theme',n);
+  document.getElementById('themeToggle').textContent=n==='dark'?'☀️ Light':'🌙 Dark';
 }
-
-document.getElementById("scanQrBtn").addEventListener("click", openQRScanner);
-document.getElementById("scanQrBtnMobile").addEventListener("click", function(e) {
-  toggleMobileMenu();
-  openQRScanner(e);
+window.addEventListener('DOMContentLoaded',()=>{
+  const t=document.documentElement.getAttribute('data-theme')||'dark';
+  document.getElementById('themeToggle').textContent=t==='dark'?'☀️ Light':'🌙 Dark';
 });
-
-document.addEventListener("DOMContentLoaded", async () => {
-
- await resetEventPayCache();
-    await loadEvents();
-  
-});
-
-  
+function toast(msg,type="info"){
+  const tc=document.getElementById("toastContainer"); const t=document.createElement("div");
+  t.className="toast "+type; t.textContent=msg; tc.appendChild(t);
+  setTimeout(()=>{t.classList.add("fade-out");setTimeout(()=>t.remove(),300);},2500);
+}
 </script>
+<script>if("serviceWorker"in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));</script>
 </body>
 </html>
