@@ -45,20 +45,24 @@
 
   document.addEventListener("DOMContentLoaded", init);
 
-function init() {
-  bindNav();
-  bindOtp();
-  bindEventTypeChange();
-  bindPlanSelection();
-  bindSubmit();
-  bindResultButtons();
+  function init() {
+    bindNav();
+    bindOtp();
+    bindEventTypeChange();
+    bindPlanSelection();
+    bindSubmit();
+    bindResultButtons();
 
-  var resumed = handlePaymentReturn();
-
-  if (!resumed) {
-    goToStep(1);
+    // handlePaymentReturn() returns true if it already navigated the
+    // wizard to a specific step (e.g. Step 3 after a successful/pending
+    // payment, or Step 2 after a failed one). Only fall back to Step 1
+    // when there was nothing to resume — otherwise this would always
+    // stomp on whatever step handlePaymentReturn() just set.
+    var resumed = handlePaymentReturn();
+    if (!resumed) {
+      goToStep(1);
+    }
   }
-}
 
   // ---------------------------------------------------------
   // STEP NAVIGATION
@@ -317,50 +321,62 @@ function init() {
     window.location.href = "payment.html?" + qs.toString();
   }
 
+  // Called once on every page load (from init()). Returns true if it
+  // navigated the wizard to a specific step because this load is a
+  // return-trip from payment.html — false if there's nothing to resume,
+  // in which case init() falls back to goToStep(1) as normal.
   function handlePaymentReturn() {
-  var params = new URLSearchParams(window.location.search);
-  var status = params.get("paymentStatus");
-  if (!status) return false;
+    var params = new URLSearchParams(window.location.search);
+    var status = params.get("paymentStatus");
+    if (!status) return false;
 
-  window.history.replaceState({}, document.title, window.location.pathname);
+    window.history.replaceState({}, document.title, window.location.pathname);
 
-  var stashed = {};
-  try { stashed = JSON.parse(sessionStorage.getItem("ep_pending_plan") || "{}"); } catch (e) {}
+    // Read the stash BEFORE deleting it, and restore it into the form —
+    // this page load is a fresh navigation, so every input is blank and
+    // the stash is the only surviving copy of what the user already typed.
+    var stashed = {};
+    try { stashed = JSON.parse(sessionStorage.getItem("ep_pending_plan") || "{}"); } catch (e) {}
 
-  if (stashed.organizerName)  document.getElementById("organizerName").value  = stashed.organizerName;
-  if (stashed.organizerPhone) document.getElementById("organizerPhone").value = stashed.organizerPhone;
-  if (stashed.organizerEmail) document.getElementById("organizerEmail").value = stashed.organizerEmail;
-  if (stashed.plan) {
-    state.plan = stashed.plan;
-    var radio = document.querySelector('input[name="plan"][value="' + stashed.plan + '"]');
-    if (radio) radio.checked = true;
-    updatePlanContinueBtn();
+    if (stashed.organizerName)  document.getElementById("organizerName").value  = stashed.organizerName;
+    if (stashed.organizerPhone) document.getElementById("organizerPhone").value = stashed.organizerPhone;
+    if (stashed.organizerEmail) document.getElementById("organizerEmail").value = stashed.organizerEmail;
+    if (stashed.plan) {
+      state.plan = stashed.plan; // fallback used by collectFormData()
+      var radio = document.querySelector('input[name="plan"][value="' + stashed.plan + '"]');
+      if (radio) radio.checked = true;
+      updatePlanContinueBtn();
+    }
+    state.otpVerified = true; // they already verified OTP before reaching Step 2
+
+    sessionStorage.removeItem("ep_pending_plan");
+    sessionStorage.removeItem("eventpay_pending_application");
+
+    if (status === "success") {
+      state.eventStatus = "Active";
+      goToStep(3);
+    } else if (status === "pendingVerification") {
+      state.eventStatus = "Inactive";
+      goToStep(3);
+    } else if (status === "failed") {
+      goToStep(2);
+      resetPlanSelection();
+      showToast("Payment Failed. Please select a plan to try again.");
+    }
+
+    return true;
   }
-  state.otpVerified = true;
 
-  sessionStorage.removeItem("ep_pending_plan");
-  sessionStorage.removeItem("eventpay_pending_application");
-
-  if (status === "success") {
-    state.eventStatus = "Active";
-    goToStep(3);
-  } else if (status === "pendingVerification") {
-    state.eventStatus = "Inactive";
-    goToStep(3);
-  } else if (status === "failed") {
-    goToStep(2);
-    resetPlanSelection();
-    showToast("Payment Failed. Please select a plan to try again.");
-  }
-
-  return true;
-}
   function collectFormData() {
     var eventType = getSelectedEventType();
     var data = {
       organizerName: val("organizerName"),
       organizerPhone: val("organizerPhone"),
       organizerEmail: val("organizerEmail"),
+      // Falls back to the plan restored from the payment-return stash in
+      // case the plan radio wasn't (re-)checked for any reason — without
+      // this, a successful paid signup could reach submitEventApplication
+      // with plan === null.
       plan: getSelectedPlan() || state.plan,
       eventType: eventType,
       eventDate: val("eventDate"),
