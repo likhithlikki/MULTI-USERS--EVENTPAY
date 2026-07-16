@@ -137,65 +137,7 @@
     document.getElementById("payNowBtn").addEventListener("click", startRazorpayPayment);
   }
 
-  function startRazorpayPayment() {
-    if (state.price <= 0) { showToast("Nothing to pay for this plan."); return; }
-
-    setLoading(true, "Creating order…");
-
-    api("createSubscriptionOrder", {
-      plan: state.plan,
-      amount: state.price,
-      organizerEmail: state.organizerEmail,
-      organizerName: state.organizerName,
-      organizerPhone: state.organizerPhone
-    }, "POST").then(function (res) {
-      setLoading(false);
-
-      if (!res || !res.success) {
-        showToast((res && res.message) || "Could not create order.");
-        return;
-      }
-
-      var options = {
-        key: res.key_id,
-        amount: res.amount,
-        currency: res.currency || "INR",
-        name: "EventPay",
-        description: state.plan + " Plan Subscription",
-        order_id: res.order_id,
-        prefill: {
-          name: state.organizerName,
-          email: state.organizerEmail,
-          contact: state.organizerPhone
-        },
-        theme: { color: "#7c5cff" },
-        handler: function (response) {
-          verifyRazorpayPayment(response, res.order_id);
-        },
-        modal: {
-          ondismiss: function () {
-            showToast("Payment cancelled.");
-          }
-        }
-      };
-
-      var rzp = new Razorpay(options);
-
-      rzp.on("payment.failed", function (resp) {
-        showResult(false, {
-          title: "Payment Failed",
-          subtitle: (resp && resp.error && resp.error.description) || "Your payment could not be completed.",
-          details: {}
-        });
-      });
-
-      rzp.open();
-
-    }).catch(function (err) {
-      setLoading(false);
-      showToast("Error: " + err);
-    });
-  }
+ 
 
   function verifyRazorpayPayment(response, orderId) {
     setLoading(true, "Verifying payment…");
