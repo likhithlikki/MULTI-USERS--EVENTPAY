@@ -245,6 +245,7 @@
         style="display:none;"
         onchange="handleQRFileUpload(this)">
 </div>
+  </div>
 </div>
 
 <!-- QR GENERATOR MODAL -->
@@ -561,18 +562,30 @@ console.log("Current SID:", getEventSID());
 // QR GENERATOR — every event's card gets a QR button. Encodes the
 // event's PublicURL when available, otherwise falls back to its
 // EventCode/EventID so the scanner (below) can still resolve it.
+//
+// getEventQRValue() is the single source of truth for "what string do
+// we encode into the QR" — showEventQR() (generator) now calls it
+// directly instead of keeping its own separate copy of this logic, so
+// the generator and the scanner (findEventByQRValue) can never drift
+// out of sync on format again.
 // ============================================================
 let currentQRDataUrl = null;
 let currentQREventName = "";
 
 function getEventQRValue(ev) {
-  return ev.PublicURL || ev.AdminURL && "" || ev.EventCode || ev.EventID || "";
+  return ev.PublicURL || ev.EventCode || ev.EventID || "";
 }
 
 function showEventQR(e, evEncoded) {
   if (e && e.stopPropagation) e.stopPropagation();
+
+  // Defensive isolation: if the scanner happens to be running (camera
+  // open) when the user taps "View QR", release the camera first so
+  // the two modals never compete for the same device/DOM resources.
+  stopQRScanner();
+
   const ev = JSON.parse(decodeURIComponent(evEncoded));
-  const qrValue = ev.PublicURL || ev.EventCode || ev.EventID || "";
+  const qrValue = getEventQRValue(ev);
 
   if (!qrValue) {
     toast("This event has no code or URL to generate a QR for.", "warning");
@@ -585,6 +598,9 @@ function showEventQR(e, evEncoded) {
   document.getElementById("qrGenEventName").textContent =
     currentQREventName + (ev.EventCode ? " (" + ev.EventCode + ")" : "");
 
+  // qrGenCanvas lives inside #qrGenModal only — completely separate
+  // container from the scanner's #qrReader, so generating a new QR can
+  // never overwrite or appear inside the scanner's DOM.
   const container = document.getElementById("qrGenCanvas");
   container.innerHTML = "";
 
@@ -667,6 +683,33 @@ async function shareQR() {
 let qrScannerInstance = null;
 let qrScannerRunning = false;
 
+function extractEventIdentifierFromText(text) {
+    const val = String(text || "").trim();
+    if (!val) return val;
+
+    // If it's not a URL, use the raw value as-is (EventCode/EventID).
+    let url;
+    try {
+        url = new URL(val);
+    } catch (e) {
+        return val;
+    }
+
+    // Try common query params first: ?event=..., ?id=...
+    const paramNames = ["event", "eventid", "event_id", "id", "code", "eventcode"];
+    for (const p of paramNames) {
+        const qv = url.searchParams.get(p);
+        if (qv) return qv;
+    }
+
+    // Fall back to the last non-empty path segment, e.g.
+    // https://domain.com/event/EV000123 -> EV000123
+    const segments = url.pathname.split("/").filter(Boolean);
+    if (segments.length) return segments[segments.length - 1];
+
+    return val;
+}
+
 function findEventByQRValue(text) {
     const val = String(text || "").trim();
     if (!val) return null;
@@ -694,17 +737,31 @@ function findEventByQRValue(text) {
 }
 
 function resolveScannedEvent(decodedText) {
+    console.log("[QR] resolveScannedEvent() received raw value:", decodedText);
 
-    const match = findEventByQRValue(decodedText);
+    let match = findEventByQRValue(decodedText);
+
+    if (!match) {
+        // The scanned value may be a URL that embeds the EventCode/EventID
+        // (e.g. ?event=EV000123 or /event/EV000123) rather than matching
+        // directly — extract the identifier and try again.
+        const extracted = extractEventIdentifierFromText(decodedText);
+        console.log("[QR] no direct match, retrying with extracted identifier:", extracted);
+        if (extracted && extracted !== decodedText) {
+            match = findEventByQRValue(extracted);
+        }
+    }
 
     if (match) {
 
+        console.log("[QR] matched event:", match.EventName || match.EventCode || match.EventID);
         toast("Event found — opening " + (match.EventName || "event") + "…", "success");
 
         selectEvent(null, encodeURIComponent(JSON.stringify(match)));
 
     } else {
 
+        console.warn("[QR] no matching event found for scanned value:", decodedText);
         toast("Event not found.", "error");
 
     }
@@ -713,6 +770,8 @@ function resolveScannedEvent(decodedText) {
   
 
 function onQRScanSuccess(decodedText) {
+
+    console.log("[QR] onQRScanSuccess() fired with:", decodedText);
 
     // Prevent duplicate scan events
     if (!qrScannerRunning) return;
@@ -738,13 +797,18 @@ async function openQRScanner(e) {
         return;
     }
 
-    // Stop any previous scanner session
+    // Defensive isolation: close/clear the generator modal so a leftover
+    // QR image can never sit underneath or interfere with the live
+    // camera view, and stop any previous scanner session.
+    closeQRGen();
     await stopQRScanner();
 
     document.getElementById("qrScannerModal").classList.add("open");
     document.getElementById("qrReader").innerHTML = "";
     document.getElementById("qrScanStatus").textContent =
         "Requesting camera access...";
+
+    console.log("[QR] opening scanner, initializing Html5Qrcode...");
 
     qrScannerInstance = new Html5Qrcode("qrReader", {
         verbose: false
@@ -764,16 +828,25 @@ async function openQRScanner(e) {
     };
 
     function startCamera(camera) {
+        console.log("[QR] starting camera with constraint:", camera);
         return qrScannerInstance.start(
             camera,
             config,
             onQRScanSuccess,
-            function () {
-                // Ignore frames with no QR
+            function (errorMessage) {
+                // Per-frame "no QR found in this frame" notices — html5-qrcode
+                // calls this many times a second while scanning, which is
+                // expected and NOT an error. We intentionally don't toast or
+                // stop scanning here; we just keep this hook available for
+                // debugging (uncomment below if you need to trace frame-level
+                // decode attempts).
+                // console.debug("[QR] frame scan:", errorMessage);
             }
         ).then(function () {
 
             qrScannerRunning = true;
+
+            console.log("[QR] camera started successfully, scanning for frames...");
 
             document.getElementById("qrScanStatus").textContent =
                 "Point your camera at an event QR code...";
@@ -786,9 +859,13 @@ async function openQRScanner(e) {
         facingMode: {
             exact: "environment"
         }
-    }).catch(function () {
+    }).catch(function (err) {
+
+        console.warn("[QR] exact environment camera unavailable, falling back:", err);
 
         Html5Qrcode.getCameras().then(function (cameras) {
+
+            console.log("[QR] available cameras:", cameras);
 
             if (!cameras || !cameras.length) {
 
@@ -805,12 +882,16 @@ async function openQRScanner(e) {
 
             startCamera(rear.id).catch(function (err) {
 
+                console.error("[QR] could not start camera:", err);
+
                 document.getElementById("qrScanStatus").textContent =
                     "Could not start camera: " + err;
 
             });
 
-        }).catch(function () {
+        }).catch(function (err) {
+
+            console.error("[QR] camera permission/listing error:", err);
 
             document.getElementById("qrScanStatus").textContent =
                 "Camera permission denied.";
@@ -831,25 +912,24 @@ function stopQRScanner() {
     qrScannerInstance = null;
     qrScannerRunning = false;
 
-    if (!scanner.isScanning)
-        return Promise.resolve();
-
     return scanner.stop()
         .then(function () {
+            console.log("[QR] camera stopped.");
             return scanner.clear();
         })
-        .catch(function () {
+        .catch(function (err) {
+            console.warn("[QR] stopQRScanner() cleanup warning (safe to ignore if scanner wasn't running):", err);
             return Promise.resolve();
         });
 
 }
 
-function closeQRScanner() {
+async function closeQRScanner() {
 
     document.getElementById("qrScannerModal")
         .classList.remove("open");
 
-    stopQRScanner();
+    await stopQRScanner();
 
 }
 
@@ -868,34 +948,47 @@ function closeQRScanner() {
     document.getElementById("qrScanStatus").textContent =
         "Reading QR code from image...";
 
-    const tempScanner = new Html5Qrcode("qrReader", {
-        verbose: false
-    });
+    // Make sure a live camera session isn't holding onto #qrReader
+    // before we point a second Html5Qrcode instance at the same div.
+    stopQRScanner().then(function () {
 
-    tempScanner.scanFile(file, false)
-
-        .then(function(decodedText) {
-
-            stopQRScanner();
-
-            closeQRScanner();
-
-            resolveScannedEvent(decodedText);
-
-        })
-
-        .catch(function() {
-
-            document.getElementById("qrScanStatus").textContent =
-                "Could not detect a QR code in this image.";
-
-        })
-
-        .finally(function() {
-
-            fileInput.value = "";
-
+        const tempScanner = new Html5Qrcode("qrReader", {
+            verbose: false
         });
+
+        console.log("[QR] scanning uploaded image:", file.name);
+
+        tempScanner.scanFile(file, false)
+
+            .then(function(decodedText) {
+
+                console.log("[QR] decoded from uploaded image:", decodedText);
+
+                return tempScanner.clear().catch(function(){}).then(function() {
+                    closeQRScanner();
+                    resolveScannedEvent(decodedText);
+                });
+
+            })
+
+            .catch(function(err) {
+
+                console.error("[QR] could not decode uploaded image:", err);
+
+                document.getElementById("qrScanStatus").textContent =
+                    "Could not detect a QR code in this image.";
+
+                tempScanner.clear().catch(function(){});
+
+            })
+
+            .finally(function() {
+
+                fileInput.value = "";
+
+            });
+
+    });
 
 }
 
