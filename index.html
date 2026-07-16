@@ -667,33 +667,6 @@ async function shareQR() {
 let qrScannerInstance = null;
 let qrScannerRunning = false;
 
-function extractEventIdentifierFromText(text) {
-    const val = String(text || "").trim();
-    if (!val) return val;
-
-    // If it's not a URL, use the raw value as-is (EventCode/EventID).
-    let url;
-    try {
-        url = new URL(val);
-    } catch (e) {
-        return val;
-    }
-
-    // Try common query params first: ?event=..., ?id=...
-    const paramNames = ["event", "eventid", "event_id", "id", "code", "eventcode"];
-    for (const p of paramNames) {
-        const qv = url.searchParams.get(p);
-        if (qv) return qv;
-    }
-
-    // Fall back to the last non-empty path segment, e.g.
-    // https://domain.com/event/EV000123 -> EV000123
-    const segments = url.pathname.split("/").filter(Boolean);
-    if (segments.length) return segments[segments.length - 1];
-
-    return val;
-}
-
 function findEventByQRValue(text) {
     const val = String(text || "").trim();
     if (!val) return null;
@@ -722,17 +695,7 @@ function findEventByQRValue(text) {
 
 function resolveScannedEvent(decodedText) {
 
-    let match = findEventByQRValue(decodedText);
-
-    if (!match) {
-        // The scanned value may be a URL that embeds the EventCode/EventID
-        // (e.g. ?event=EV000123 or /event/EV000123) rather than matching
-        // directly — extract the identifier and try again.
-        const extracted = extractEventIdentifierFromText(decodedText);
-        if (extracted && extracted !== decodedText) {
-            match = findEventByQRValue(extracted);
-        }
-    }
+    const match = findEventByQRValue(decodedText);
 
     if (match) {
 
@@ -868,6 +831,9 @@ function stopQRScanner() {
     qrScannerInstance = null;
     qrScannerRunning = false;
 
+    if (!scanner.isScanning)
+        return Promise.resolve();
+
     return scanner.stop()
         .then(function () {
             return scanner.clear();
@@ -878,12 +844,12 @@ function stopQRScanner() {
 
 }
 
-async function closeQRScanner() {
+function closeQRScanner() {
 
     document.getElementById("qrScannerModal")
         .classList.remove("open");
 
-    await stopQRScanner();
+    stopQRScanner();
 
 }
 
