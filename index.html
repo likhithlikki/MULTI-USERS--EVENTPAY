@@ -109,6 +109,21 @@
 /* QR READER */
 #qrReader{border-radius:14px;overflow:hidden}
 #qrReader video{border-radius:14px}
+
+/* ============================================================
+   QR SCANNER OVERLAY (added) — purely cosmetic layer sitting on
+   top of the existing #qrReader video. Does not touch html5-qrcode's
+   own DOM, does not change layout of anything else on the page.
+   ============================================================ */
+#qrReaderWrap{position:relative;border-radius:14px;overflow:hidden}
+#qrScanBox{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:70%;max-width:230px;aspect-ratio:1/1;border:4px solid #9ca3af;border-radius:16px;pointer-events:none;transition:border-color .12s ease,box-shadow .12s ease;box-shadow:0 0 0 999px rgba(0,0,0,.28);z-index:4}
+#qrScanBox.qr-box-idle{border-color:#9ca3af}
+#qrScanBox.qr-box-candidate{border-color:#f59e0b}
+#qrScanBox.qr-box-success{border-color:#22c55e}
+#qrScanBox.qr-box-fail{border-color:#ef4444}
+#qrScanLabel{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.65);color:#fff;font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px;pointer-events:none;z-index:5;white-space:nowrap}
+#qrDebugToggle{position:absolute;top:8px;left:8px;width:26px;height:26px;border-radius:8px;background:rgba(0,0,0,.55);color:#fff;border:none;font-size:13px;cursor:pointer;z-index:6;line-height:1}
+#qrDebugPanel{position:absolute;top:8px;right:8px;left:auto;background:rgba(0,0,0,.78);color:#4ade80;font-family:'JetBrains Mono',monospace;font-size:10px;line-height:1.5;padding:8px 10px;border-radius:8px;max-width:180px;display:none;z-index:6;text-align:left}
 </style>
 </head>
 <body>
@@ -224,7 +239,16 @@
       <div class="modal-title">📷 Scan Event QR</div>
       <button class="modal-close" onclick="closeQRScanner()">✕</button>
     </div>
-   <div id="qrReader" style="width:100%;min-height:260px;"></div>
+
+    <!-- Wrapper added so the scan-box/status/debug overlay can sit on
+         top of #qrReader without touching html5-qrcode's own DOM. -->
+    <div id="qrReaderWrap">
+      <div id="qrReader" style="width:100%;min-height:260px;"></div>
+      <div id="qrScanBox" class="qr-box-idle"></div>
+      <div id="qrScanLabel">Searching...</div>
+      <button id="qrDebugToggle" onclick="toggleQRDebugMode()" title="Toggle scanner debug panel">🐞</button>
+      <div id="qrDebugPanel"></div>
+    </div>
 
 <div id="qrScanStatus"
      style="margin-top:14px;font-size:13px;color:var(--text-muted);text-align:center;">
@@ -268,6 +292,10 @@
 <script src="config.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<!-- jsQR: pure-JS QR decoder used ONLY as the Task-3 frame-capture
+     fallback. html5-qrcode remains the primary engine and still owns
+     all camera lifecycle (start/stop/permissions). -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></script>
 <script>
 
 async function resetEventPayCache() {
@@ -568,6 +596,13 @@ console.log("Current SID:", getEventSID());
 // directly instead of keeping its own separate copy of this logic, so
 // the generator and the scanner (findEventByQRValue) can never drift
 // out of sync on format again.
+//
+// [Task 7 fix] correctLevel bumped M -> H and canvas size bumped
+// 220 -> 300px. Both changes only affect how forgiving/scannable the
+// generated QR is; nothing about the surrounding UI or flow changes.
+// Higher error correction (H) tolerates more damage/glare/blur, and a
+// larger render gives the camera more physical pixels per QR module,
+// which measurably helps live-camera detection distance/reliability.
 // ============================================================
 let currentQRDataUrl = null;
 let currentQREventName = "";
@@ -607,11 +642,11 @@ function showEventQR(e, evEncoded) {
   try {
     new QRCode(container, {
       text: qrValue,
-      width: 220,
-      height: 220,
+      width: 300,
+      height: 300,
       colorDark: "#000000",
       colorLight: "#ffffff",
-      correctLevel: QRCode.CorrectLevel.M
+      correctLevel: QRCode.CorrectLevel.H
     });
   } catch (err) {
     container.innerHTML = "<div style='color:var(--danger);font-size:13px;'>Could not generate QR code.</div>";
@@ -679,9 +714,245 @@ async function shareQR() {
 // QR SCANNER — opens the device camera, reads a QR containing an
 // Event ID, Event Code, or Event URL, then opens the matching event.
 // Works on both desktop (webcam) and mobile (rear camera preferred).
+//
+// [Deep-debug notes — read this before touching anything below]
+//
+// Root cause analysis of "live camera never decodes":
+//  1. html5-qrcode 2.3.8 IS the latest official release (verified —
+//     there is no newer 2.x/3.x published on npm), so "upgrade the
+//     library" is not a fix available to us. The Task 4 ask is
+//     satisfied by confirming this rather than bumping a version
+//     number that doesn't exist.
+//  2. The camera preview working while decoding never fires means the
+//     getUserMedia/<video> pipeline is fine — the failure is isolated
+//     to html5-qrcode's internal decode loop, which runs on a canvas
+//     snapshot of the video, cropped to the qrbox region. The most
+//     common causes for that internal loop silently never succeeding,
+//     in order of likelihood for this codebase, are:
+//       a) The qrbox function computes its box from the *container's*
+//          rendered CSS size, not the actual video pixel size. If the
+//          container's aspect ratio doesn't match the camera's actual
+//          stream aspect ratio, html5-qrcode letterboxes/pillarboxes
+//          the video, and the "box" your CSS overlay shows visually
+//          can end up misaligned with the region the library is
+//          actually cropping and scanning — a real QR code can sit
+//          dead-center on screen while the library scans a different
+//          slice of the frame.
+//       b) Lower-end/older Android/iOS browsers throttle canvas
+//          decode work when the tab loses full focus/priority (e.g.
+//          behind a modal's backdrop-filter/blur layer), causing the
+//          scan loop to run far slower than its configured fps, which
+//          looks identical to "never decodes" to the end user.
+//       c) Insufficient light/contrast/resolution for the bundled
+//          decoder specifically (as opposed to scanFile()'s decoder
+//          path, which runs once against a full still image at full
+//          resolution and is far more tolerant of exactly this).
+//     This is exactly why scanFile() (upload) already works — it
+//     decodes one full-resolution still frame with no fps/roi
+//     cropping involved — while the live loop can silently fail frame
+//     after frame for any of the reasons above.
+//  3. Because the failure mode is "silently returns not-found forever"
+//     rather than a thrown error, it cannot be conclusively pinned to
+//     one of (a)/(b)/(c) from static code review alone — it needs the
+//     staged console logs below, read from an actual device, to see
+//     exactly where the pipeline stalls (Camera Started fires but
+//     Frames Arriving never does => (b); Frames Arriving fires
+//     constantly but Decode Attempt never succeeds => (a) or (c)).
+//
+// Fix strategy implemented below (minimum-diff, additive only):
+//  - Every stage in the requested pipeline is logged with a "[QR]"
+//    prefix so the exact stall point is visible in the console.
+//  - A visual scan-box overlay + status label reflect scanner state
+//    in real time (idle/candidate/success/fail) — Task 2.
+//  - A jsQR-based fallback decoder captures a live video frame every
+//    ~400ms independently of html5-qrcode's internal loop and
+//    attempts a manual decode. This sidesteps whatever is silently
+//    stalling the built-in loop entirely, because it always operates
+//    on the true video pixel buffer at native resolution — Task 3.
+//  - Both paths funnel into the SAME onQRScanSuccess()/
+//    resolveScannedEvent() functions, unchanged in name and
+//    signature, and qrScannerRunning is still the single guard that
+//    prevents a duplicate/double-fire between the two — Task 9.
+//  - Camera constraint fallback gains one extra tier (non-exact
+//    "environment") between the exact match and the raw device list
+//    — Task 6.
 // ============================================================
 let qrScannerInstance = null;
 let qrScannerRunning = false;
+
+// --- Fallback decoder + debug-mode state (added) ---
+let qrFallbackTimer = null;
+let qrFallbackCanvas = null;
+let qrFallbackCtx = null;
+let qrDebugMode = false;
+let qrDebugInterval = null;
+let qrFramesArrivingLogged = false;
+let qrDebugStats = {
+  fps: 0,
+  resolution: "—",
+  framesProcessed: 0,
+  decodeAttempts: 0,
+  decodeSuccess: 0,
+  decodeFail: 0,
+  decodeTimes: [],
+  lastDecodedText: "—",
+  _fpsWindowStart: 0
+};
+
+function resetQRDebugStats() {
+  qrDebugStats.fps = 0;
+  qrDebugStats.resolution = "—";
+  qrDebugStats.framesProcessed = 0;
+  qrDebugStats.decodeAttempts = 0;
+  qrDebugStats.decodeSuccess = 0;
+  qrDebugStats.decodeFail = 0;
+  qrDebugStats.decodeTimes = [];
+  qrDebugStats.lastDecodedText = "—";
+  qrDebugStats._fpsWindowStart = performance.now();
+  qrFramesArrivingLogged = false;
+}
+
+function setScanBoxState(state) {
+  // state: 'idle' | 'candidate' | 'success' | 'fail'
+  const box = document.getElementById("qrScanBox");
+  if (!box) return;
+  box.classList.remove("qr-box-idle", "qr-box-candidate", "qr-box-success", "qr-box-fail");
+  box.classList.add("qr-box-" + state);
+}
+
+function setScanLabel(text) {
+  const lbl = document.getElementById("qrScanLabel");
+  if (lbl) lbl.textContent = text;
+}
+
+function toggleQRDebugMode() {
+  qrDebugMode = !qrDebugMode;
+  const panel = document.getElementById("qrDebugPanel");
+  if (panel) panel.style.display = qrDebugMode ? "block" : "none";
+  console.log("[QR][Debug] debug mode " + (qrDebugMode ? "ON" : "OFF"));
+}
+
+function startDebugStatsLoop() {
+  stopDebugStatsLoop();
+  qrDebugInterval = setInterval(function () {
+    if (!qrDebugMode) return;
+    const now = performance.now();
+    const elapsedSec = (now - qrDebugStats._fpsWindowStart) / 1000;
+    qrDebugStats.fps = elapsedSec > 0 ? Math.round(qrDebugStats.framesProcessed / elapsedSec) : 0;
+    const avg = qrDebugStats.decodeTimes.length
+      ? (qrDebugStats.decodeTimes.reduce(function (a, b) { return a + b; }, 0) / qrDebugStats.decodeTimes.length).toFixed(1)
+      : "0.0";
+    const panel = document.getElementById("qrDebugPanel");
+    if (panel) {
+      panel.innerHTML =
+        "FPS: " + qrDebugStats.fps + "<br>" +
+        "Res: " + qrDebugStats.resolution + "<br>" +
+        "Frames: " + qrDebugStats.framesProcessed + "<br>" +
+        "Attempts: " + qrDebugStats.decodeAttempts + "<br>" +
+        "Success: " + qrDebugStats.decodeSuccess + "<br>" +
+        "Fail: " + qrDebugStats.decodeFail + "<br>" +
+        "Avg: " + avg + "ms<br>" +
+        "Last: " + sanitize(String(qrDebugStats.lastDecodedText)).slice(0, 26);
+    }
+  }, 500);
+}
+
+function stopDebugStatsLoop() {
+  if (qrDebugInterval) {
+    clearInterval(qrDebugInterval);
+    qrDebugInterval = null;
+  }
+}
+
+// [Task 3] Frame-capture fallback decoder. Runs independently of
+// html5-qrcode's internal loop, reading straight off the <video>
+// element html5-qrcode itself created inside #qrReader.
+function startFallbackDecoder() {
+  stopFallbackDecoder();
+
+  if (typeof jsQR === "undefined") {
+    console.warn("[QR][Fallback] jsQR did not load — fallback decoder disabled, relying on html5-qrcode only.");
+    return;
+  }
+
+  const videoEl = document.querySelector("#qrReader video");
+  if (!videoEl) {
+    console.warn("[QR][Fallback] no <video> element found inside #qrReader yet — fallback decoder not started.");
+    return;
+  }
+
+  qrFallbackCanvas = document.createElement("canvas");
+  qrFallbackCtx = qrFallbackCanvas.getContext("2d", { willReadFrequently: true });
+
+  console.log("[QR][Fallback] frame-capture fallback decoder armed (every 400ms).");
+
+  qrFallbackTimer = setInterval(function () {
+    if (!qrScannerRunning || !videoEl.videoWidth) return;
+
+    if (!qrFramesArrivingLogged) {
+      qrFramesArrivingLogged = true;
+      console.log("[QR] Frames Arriving — video producing frames at " + videoEl.videoWidth + "x" + videoEl.videoHeight);
+    }
+
+    qrDebugStats.resolution = videoEl.videoWidth + "x" + videoEl.videoHeight;
+    qrFallbackCanvas.width = videoEl.videoWidth;
+    qrFallbackCanvas.height = videoEl.videoHeight;
+
+    try {
+      qrFallbackCtx.drawImage(videoEl, 0, 0, qrFallbackCanvas.width, qrFallbackCanvas.height);
+    } catch (e) {
+      return; // frame not ready yet
+    }
+
+    qrDebugStats.framesProcessed++;
+
+    let imageData;
+    try {
+      imageData = qrFallbackCtx.getImageData(0, 0, qrFallbackCanvas.width, qrFallbackCanvas.height);
+    } catch (e) {
+      console.warn("[QR][Fallback] could not read frame pixel data:", e);
+      return;
+    }
+
+    qrDebugStats.decodeAttempts++;
+    const t0 = performance.now();
+    let result = null;
+    try {
+      result = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "attemptBoth" });
+    } catch (e) {
+      console.error("[QR][Fallback] jsQR threw while decoding a frame:", e);
+    }
+    const dt = performance.now() - t0;
+    qrDebugStats.decodeTimes.push(dt);
+    if (qrDebugStats.decodeTimes.length > 30) qrDebugStats.decodeTimes.shift();
+
+    if (result && result.data) {
+      qrDebugStats.decodeSuccess++;
+      qrDebugStats.lastDecodedText = result.data;
+      console.log("[QR] Decode Success (fallback decoder) — Decoded Text:", result.data);
+      setScanBoxState("success");
+      setScanLabel("Valid QR");
+      // Funnels into the exact same success path as html5-qrcode's own
+      // callback. qrScannerRunning guards against a double-fire if
+      // html5-qrcode's internal decoder succeeds on the same frame.
+      onQRScanSuccess(result.data);
+    } else {
+      qrDebugStats.decodeFail++;
+      if (!qrScannerRunning) return;
+      setScanBoxState("idle");
+      setScanLabel("Searching...");
+    }
+  }, 400);
+}
+
+function stopFallbackDecoder() {
+  if (qrFallbackTimer) {
+    clearInterval(qrFallbackTimer);
+    qrFallbackTimer = null;
+  }
+  qrFallbackCanvas = null;
+  qrFallbackCtx = null;
+}
 
 function extractEventIdentifierFromText(text) {
     const val = String(text || "").trim();
@@ -754,7 +1025,8 @@ function resolveScannedEvent(decodedText) {
 
     if (match) {
 
-        console.log("[QR] matched event:", match.EventName || match.EventCode || match.EventID);
+        console.log("[QR] Event Found:", match.EventName || match.EventCode || match.EventID);
+        setScanLabel("Event Found");
         toast("Event found — opening " + (match.EventName || "event") + "…", "success");
 
         selectEvent(null, encodeURIComponent(JSON.stringify(match)));
@@ -762,6 +1034,8 @@ function resolveScannedEvent(decodedText) {
     } else {
 
         console.warn("[QR] no matching event found for scanned value:", decodedText);
+        setScanBoxState("fail");
+        setScanLabel("Event Not Found");
         toast("Event not found.", "error");
 
     }
@@ -777,6 +1051,9 @@ function onQRScanSuccess(decodedText) {
     if (!qrScannerRunning) return;
 
     qrScannerRunning = false;
+
+    setScanBoxState("success");
+    setScanLabel("Decoding...");
 
     stopQRScanner().then(function () {
 
@@ -808,7 +1085,11 @@ async function openQRScanner(e) {
     document.getElementById("qrScanStatus").textContent =
         "Requesting camera access...";
 
-    console.log("[QR] opening scanner, initializing Html5Qrcode...");
+    resetQRDebugStats();
+    setScanBoxState("idle");
+    setScanLabel("Searching...");
+
+    console.log("[QR] Scanner Initialized — opening scanner, initializing Html5Qrcode...");
 
     qrScannerInstance = new Html5Qrcode("qrReader", {
         verbose: false
@@ -828,7 +1109,7 @@ async function openQRScanner(e) {
     };
 
     function startCamera(camera) {
-        console.log("[QR] starting camera with constraint:", camera);
+        console.log("[QR] Camera Permission — starting camera with constraint:", camera);
         return qrScannerInstance.start(
             camera,
             config,
@@ -836,65 +1117,105 @@ async function openQRScanner(e) {
             function (errorMessage) {
                 // Per-frame "no QR found in this frame" notices — html5-qrcode
                 // calls this many times a second while scanning, which is
-                // expected and NOT an error. We intentionally don't toast or
-                // stop scanning here; we just keep this hook available for
-                // debugging (uncomment below if you need to trace frame-level
-                // decode attempts).
-                // console.debug("[QR] frame scan:", errorMessage);
+                // expected and NOT an error. We use it to drive the overlay
+                // and debug counters instead of treating it as a failure.
+                qrDebugStats.decodeAttempts++;
+
+                if (!qrFramesArrivingLogged) {
+                    qrFramesArrivingLogged = true;
+                    console.log("[QR] Frames Arriving — html5-qrcode internal decode loop is running.");
+                }
+
+                const msg = String(errorMessage || "");
+                if (/NotFoundException|No MultiFormat|not found/i.test(msg)) {
+                    if (qrScannerRunning) {
+                        setScanBoxState("idle");
+                        setScanLabel("Searching...");
+                    }
+                } else {
+                    // A genuine decode attempt that matched a QR-like pattern
+                    // but failed to fully decode it (blur, glare, partial code).
+                    qrDebugStats.decodeFail++;
+                    if (qrScannerRunning) {
+                        setScanBoxState("fail");
+                        setScanLabel("Decoding...");
+                    }
+                }
+
+                if (qrDebugMode && qrDebugStats.decodeAttempts % 25 === 0) {
+                    console.debug("[QR] frame scan (html5-qrcode internal):", errorMessage);
+                }
             }
         ).then(function () {
 
             qrScannerRunning = true;
 
-            console.log("[QR] camera started successfully, scanning for frames...");
+            console.log("[QR] Camera Started successfully, scanning for frames...");
 
             document.getElementById("qrScanStatus").textContent =
                 "Point your camera at an event QR code...";
 
+            // Task 3: arm the independent frame-capture fallback decoder
+            // once the camera (and its <video> element) actually exists.
+            startFallbackDecoder();
+            startDebugStatsLoop();
+
         });
     }
 
-    // Prefer rear camera
+    // Prefer rear camera. Fallback chain (Task 6):
+    //   1. facingMode exact "environment"  (best on mobile when supported)
+    //   2. facingMode "environment" (non-exact — more permissive, helps
+    //      on devices/browsers that reject "exact" outright, e.g. some
+    //      desktop/webcam setups and a subset of Android browsers)
+    //   3. explicit camera device list, preferring a label that looks
+    //      like a rear camera, else the last camera in the list
     startCamera({
         facingMode: {
             exact: "environment"
         }
     }).catch(function (err) {
 
-        console.warn("[QR] exact environment camera unavailable, falling back:", err);
+        console.warn("[QR] exact environment camera unavailable, trying non-exact facingMode:", err);
 
-        Html5Qrcode.getCameras().then(function (cameras) {
+        startCamera({ facingMode: "environment" }).catch(function (err2) {
 
-            console.log("[QR] available cameras:", cameras);
+            console.warn("[QR] non-exact environment camera unavailable, falling back to camera list:", err2);
 
-            if (!cameras || !cameras.length) {
+            Html5Qrcode.getCameras().then(function (cameras) {
+
+                console.log("[QR] available cameras:", cameras);
+
+                if (!cameras || !cameras.length) {
+
+                    document.getElementById("qrScanStatus").textContent =
+                        "No camera found.";
+
+                    return;
+                }
+
+                const rear =
+                    cameras.find(function (c) {
+                        return /back|rear|environment/i.test(c.label || "");
+                    }) || cameras[cameras.length - 1];
+
+                startCamera(rear.id).catch(function (err3) {
+
+                    console.error("[QR] could not start camera:", err3);
+
+                    document.getElementById("qrScanStatus").textContent =
+                        "Could not start camera: " + err3;
+
+                });
+
+            }).catch(function (err3) {
+
+                console.error("[QR] camera permission/listing error:", err3);
 
                 document.getElementById("qrScanStatus").textContent =
-                    "No camera found.";
-
-                return;
-            }
-
-            const rear =
-                cameras.find(function (c) {
-                    return /back|rear|environment/i.test(c.label || "");
-                }) || cameras[cameras.length - 1];
-
-            startCamera(rear.id).catch(function (err) {
-
-                console.error("[QR] could not start camera:", err);
-
-                document.getElementById("qrScanStatus").textContent =
-                    "Could not start camera: " + err;
+                    "Camera permission denied.";
 
             });
-
-        }).catch(function (err) {
-
-            console.error("[QR] camera permission/listing error:", err);
-
-            document.getElementById("qrScanStatus").textContent =
-                "Camera permission denied.";
 
         });
 
@@ -903,6 +1224,9 @@ async function openQRScanner(e) {
 }
 
 function stopQRScanner() {
+
+    stopFallbackDecoder();
+    stopDebugStatsLoop();
 
     if (!qrScannerInstance)
         return Promise.resolve();
