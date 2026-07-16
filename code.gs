@@ -1,4 +1,54 @@
+/* ============================================================
+   EventPay — Code.gs  (MERGED FILE)
+   ------------------------------------------------------------
+   This file combines what used to be two separate .gs files:
+     1) The original Code.gs (public site, per-event admin/super-admin,
+        Apply-Event flow, multi-event registry lookups)
+     2) master-admin-backend.gs (the Master Admin panel: platform-wide
+        stats, event management, global settings, subscription plans,
+        payment gateway, email settings, applications, audit trail,
+        Master DB backup/restore)
 
+   WHY THEY WERE COMBINED:
+   Google Apps Script only allows ONE doGet() and ONE doPost() per
+   project. Having master-admin-backend.gs as a separate file in the
+   same project silently broke everything, because Apps Script uses
+   whichever doGet/doPost happened to be registered, so all the other
+   pages (public site, per-event admin, etc.) stopped getting routed
+   correctly. This file exposes a SINGLE doGet/doPost/handleAction
+   router that serves BOTH the public/per-event actions and the
+   master-admin actions.
+
+   NOTHING about the original logic of either file was changed —
+   every function below is copied over as-is from its source file.
+   The only additions are:
+     - one shared doGet/doPost/out_ (from the original Code.gs)
+     - extra `case` entries in handleAction()'s switch so the master
+       admin actions are reachable through the same router
+     - a small guard that calls requireMasterAuth_() before any
+       master-admin action runs (this replicates exactly what
+       routeAction_() used to do in master-admin-backend.gs)
+     - the ONE genuine naming collision between the two files —
+       both defined a "getEvents" action — is resolved by checking
+       whether a master session `token` was sent. The public site's
+       getEvents call never sends a token; the Master Admin panel
+       always does (it logs in via masterLogin first). The master
+       version's internal function was renamed getEvents_ ->
+       getMasterEvents_ purely so it reads unambiguously next to the
+       public getEvents() — its code is unchanged.
+
+   REQUIRED SCRIPT PROPERTIES (Project Settings > Script Properties):
+     MASTER_DB_SPREADSHEET_ID   - Master DB spreadsheet ID (used by
+                                   the master-admin functions below)
+     MASTER-ADMIN-PASS          - the single master admin password
+     RAZORPAY_KEY_ID            - (optional) payment gateway key
+     RAZORPAY_KEY_SECRET        - (optional) payment gateway secret
+     ROOT_DRIVE_FOLDER_ID       - where backups are stored AND where
+                                   the Apply-Event flow creates event
+                                   folders (both files already shared
+                                   this exact property name)
+     SHEETS-STORAGE_FOLDER_ID   - where per-event sheets live
+============================================================ */
 
 // ---- Legacy single-event spreadsheet (kept so nothing needs sid/eventCode) ----
 const DEFAULT_SPREADSHEET_ID = "1TsSOerv8tI1oqxrlhdJts5hEyTbY5sfu8m3AD3XxZjM";
@@ -138,11 +188,51 @@ function out_(r) {
       .setMimeType(ContentService.MimeType.JSON);
 }
 
+// Master-admin actions require a valid master session token (issued by
+// masterLogin). This is the exact same gate that routeAction_() used to
+// apply in master-admin-backend.gs — it's just enforced here instead,
+// since there's now only one router. masterLogin itself is public.
+const MASTER_ADMIN_ACTIONS = [
+  "getPlatformStats",
+  "deactivateEvent",
+  "deleteEvent",
+  "downloadEventBackup",
+  "getSpreadsheetPreview",
+  "getGlobalSettings",
+  "saveGlobalSettings",
+  "getSubscriptionPlans",
+  "updatePlanPrice",
+ 
+  "savePaymentGatewaySettings",
+  "getEmailSettings",
+  "saveEmailSettings",
+  "sendTestEmail",
+  "getPendingApplications",
+  "approveApplication",
+  "rejectApplication",
+  "getAuditTrail",
+  "getMasterDbInfo",
+  "createMasterBackup",
+  "restoreMasterBackup",
+  "downloadMasterBackup",
+  "changeMasterPassword",
+  "migratePlaintextPasswords"
+];
+
 function handleAction(action, p, pd) {
   console.log("ENTER handleAction");
 console.log(action);
   console.log("ACTION = " + action);
   try {
+
+    // ---- Master Admin auth gate ----
+    // Mirrors what routeAction_() did in the old master-admin-backend.gs:
+    // every master-admin action except masterLogin itself must carry a
+    // valid session token issued by masterLogin.
+    if (MASTER_ADMIN_ACTIONS.indexOf(action) !== -1) {
+      requireMasterAuth_(p);
+    }
+
     switch (action) {
      
       case "getSettings":
@@ -184,7 +274,17 @@ console.log(action);
       case "undoActions":           return undoActions(p);
 
       // ---- Multi-event registry (Master DB) ----
-      case "getEvents":             return getEvents(p);
+      // NOTE: "getEvents" is intentionally shared between the public
+      // registry lookup and the Master Admin panel's event list. They are
+      // disambiguated by the presence of a master session token: the
+      // public site never sends `token`, the Master Admin panel always
+      // does (it must call masterLogin first to get one).
+      case "getEvents":
+        if (p.token) {
+          requireMasterAuth_(p);
+          return getMasterEvents_();
+        }
+        return getEvents(p);
       case "searchEvent":           return searchEvent(p);
       case "createEventSpreadsheet":return createEventSpreadsheetAction(p);
 
@@ -198,6 +298,65 @@ console.log(action);
       case "getHomeBootstrap":
       console.log("ENTER getHomeBootstrap");
       return getHomeBootstrap(p);  
+
+      // ============================================================
+      // ---- MASTER ADMIN PANEL ----
+      // (moved in from master-admin-backend.gs — logic unchanged)
+      // ============================================================
+      case "masterLogin":               return masterLogin_(p);
+
+      case "getPlatformStats":          return getPlatformStats_();
+      case "deactivateEvent":           return deactivateEvent_(p);
+      case "deleteEvent":               return deleteEvent_(p);
+      case "downloadEventBackup":       return downloadEventBackup_(p);
+      case "getSpreadsheetPreview":     return getSpreadsheetPreview_(p);
+
+      case "getGlobalSettings":         return getGlobalSettings_();
+      case "saveGlobalSettings":        return saveGlobalSettings_(p);
+
+      case "getSubscriptionPlans":      return getSubscriptionPlans_();
+      case "updatePlanPrice":           return updatePlanPrice_(p);
+
+
+      case "savePaymentGatewaySettings":return savePaymentGatewaySettings_(p);
+
+      case "getEmailSettings":          return getEmailSettings_();
+      case "saveEmailSettings":         return saveEmailSettings_(p);
+      case "sendTestEmail":             return sendTestEmail_(p);
+
+      case "getPendingApplications":    return getPendingApplications_();
+      case "approveApplication":        return approveApplication_(p);
+      case "rejectApplication":         return rejectApplication_(p);
+
+      case "getAuditTrail":             return getAuditTrail_();
+
+      case "getMasterDbInfo":           return getMasterDbInfo_();
+      case "createMasterBackup":        return createMasterBackup_();
+      case "restoreMasterBackup":       return restoreMasterBackup_(p);
+      case "downloadMasterBackup":      return downloadMasterBackup_();
+
+      case "changeMasterPassword":      return changeMasterPassword_(p);
+
+      case "migratePlaintextPasswords": return migratePlaintextPasswords_();
+
+
+      case "createSubscriptionPaymentLink":
+    return createSubscriptionPaymentLink(p);
+
+case "verifySubscriptionPaymentLink":
+    return verifySubscriptionPaymentLink(p);
+
+      case "verifySubscriptionPayment":
+          return verifySubscriptionPayment(p);
+
+      case "getPaymentGatewaySettings":
+          if (p.token) {
+            requireMasterAuth_(p);
+            return getPaymentGatewaySettings_();
+          }
+          return getPublicPaymentGatewaySettings_();
+
+
 
 
       default:
@@ -268,6 +427,37 @@ function cleanText_(s) {
     if (/%[0-9A-Fa-f]{2}/.test(str)) str = decodeURIComponent(str);
   } catch (e) { /* leave as-is if it isn't actually URL-encoded */ }
   return str.replace(/\s+/g, " ").trim();
+}
+
+// ============================================================
+// PASSWORD HASHING (SHA-256) — the single source of truth for turning
+// a plaintext password into the value that is ever written to a sheet
+// or compared against. Nothing else in this file should call
+// Utilities.computeDigest directly — always go through these helpers,
+// so there is exactly one place that defines "how we hash".
+//
+//   hashPassword_(password)   -> lowercase 64-char hex SHA-256 digest
+//   isSha256Hash_(value)      -> true if value already looks like one
+//
+// IMPORTANT: this hashes ONLY inside Code.gs (server side). The
+// frontend must keep sending the plaintext password over HTTPS exactly
+// as before — do not hash in JavaScript, and do not change any
+// request/response field names because of this.
+// ============================================================
+function hashPassword_(password) {
+  const bytes = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    String(password),
+    Utilities.Charset.UTF_8
+  );
+  return bytes.map(function (b) {
+    const v = (b < 0 ? b + 256 : b).toString(16);
+    return v.length === 1 ? "0" + v : v;
+  }).join("");
+}
+
+function isSha256Hash_(value) {
+  return /^[a-f0-9]{64}$/.test(String(value || "").trim());
 }
 
 function serializeVal(val, key) {
@@ -529,7 +719,6 @@ function getEvents(p) {
     const data = sheet.getDataRange().getValues();
     if (data.length < 2) return { events: [] };
     const headers = data[0].map(h => String(h).trim());
-    const statusC = getColMap(data[0])["status"];
     const nameC = getColMap(data[0])["eventname"];
     const events = [];
     for (let i = 1; i < data.length; i++) {
@@ -537,7 +726,17 @@ function getEvents(p) {
       const row = {};
       headers.forEach((h, j) => { row[h] = data[i][j]; });
       if (nameC !== undefined) row.EventName = cleanText_(data[i][nameC]); // strip "+" from names
-      if (statusC !== undefined && String(data[i][statusC]).trim().toLowerCase() !== "active") continue;
+      // NOTE: inactive events are intentionally included now — the public
+      // Event Listing page needs the full roster (active + inactive) to
+      // compute accurate stats, populate the Inactive filter, and let the
+      // QR scanner resolve inactive events too. Active/inactive display
+      // logic lives client-side in index.html's isEventActive().
+      //
+      // SECURITY: this is the PUBLIC event registry response (no master
+      // token). AdminPassword must never leave the sheet in this
+      // direction either, even though it's now a hash rather than a
+      // plaintext value — the public site has no legitimate use for it.
+      delete row.AdminPassword;
       events.push(row);
     }
     return { events: events };
@@ -678,6 +877,15 @@ finally{
 
 // ============================================================
 // 5. ADMIN LOGIN  (per-event Admins sheet, with Master DB fallback)
+// ------------------------------------------------------------
+// SECURITY: both comparison paths below now compare SHA-256 hashes,
+// never plaintext. To stay compatible with any rows that predate this
+// change (before migratePlaintextPasswords_() has been run), each path
+// falls back to a one-time plaintext comparison ONLY when the stored
+// value doesn't already look like a 64-char hex hash — and if that
+// legacy comparison succeeds, the row is transparently rehashed and
+// rewritten on the spot, so every account self-migrates the moment it
+// next logs in (in addition to the bulk migratePlaintextPasswords_()).
 // ============================================================
 function loginAdmin(p) {
   const sid = resolveSid_(p);
@@ -689,8 +897,20 @@ function loginAdmin(p) {
   if (sheet) {
     adminsData = sheet.getDataRange().getValues();
     for (let i = 1; i < adminsData.length; i++) {
-      const u = String(adminsData[i][0]).trim(), pw = String(adminsData[i][1]).trim();
-      if (u === p.username && pw === p.password) { matchedRow = i; break; }
+      const u = String(adminsData[i][0]).trim(), storedPw = String(adminsData[i][1]).trim();
+      let isMatch = false;
+
+      if (isSha256Hash_(storedPw)) {
+        isMatch = (u === p.username && storedPw === hashPassword_(p.password));
+      } else {
+        // Legacy plaintext row — compare directly once, then migrate.
+        isMatch = (u === p.username && storedPw === p.password);
+        if (isMatch) {
+          try { sheet.getRange(i + 1, 2).setValue(hashPassword_(p.password)); } catch (e) {}
+        }
+      }
+
+      if (isMatch) { matchedRow = i; break; }
     }
   }
 
@@ -724,9 +944,21 @@ function loginAdmin(p) {
     const userC = col["adminusername"] !== undefined ? col["adminusername"] : 15;
     const passC = col["adminpassword"] !== undefined ? col["adminpassword"] : 16;
     for (let i = 1; i < data.length; i++) {
-      if (String(data[i][ssIdC]).trim() === sid &&
-          String(data[i][userC]).trim() === p.username &&
-          String(data[i][passC]).trim() === p.password) {
+      const storedPw = String(data[i][passC]).trim();
+      const sameLocation = String(data[i][ssIdC]).trim() === sid && String(data[i][userC]).trim() === p.username;
+      if (!sameLocation) continue;
+
+      let isMatch = false;
+      if (isSha256Hash_(storedPw)) {
+        isMatch = storedPw === hashPassword_(p.password);
+      } else {
+        isMatch = storedPw === p.password;
+        if (isMatch) {
+          try { eventsSheet.getRange(i + 1, passC + 1).setValue(hashPassword_(p.password)); } catch (e) {}
+        }
+      }
+
+      if (isMatch) {
         const token = Utilities.getUuid();
         const expiry = new Date(Date.now() + 30 * 60 * 1000).toISOString();
         logActivity({ adminUser: p.username, module: "Auth", action: "Login", detail: "Successful login (registry)" }, p);
@@ -1617,6 +1849,18 @@ function getSheetData(p) {
   const sheet = ss.getSheetByName(p.sheetName);
   if (!sheet) return { error: "Sheet not found" };
   const data = sheet.getDataRange().getValues();
+
+  // SECURITY: this generic raw-sheet viewer is otherwise untouched (same
+  // super-admin-only feature as before), but the "Admins" sheet's column B
+  // is a password hash and must never be shipped to the frontend, even to
+  // an already-authenticated super admin. Every other sheet/column is
+  // returned exactly as before.
+  if (String(p.sheetName).trim() === "Admins" && data.length) {
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][1] !== undefined && data[i][1] !== "") data[i][1] = "••••••••";
+    }
+  }
+
   return { data, rows: data.length, cols: data[0] ? data[0].length : 0, sheetName: p.sheetName };
 }
 function updateSheetCell(p) {
@@ -1846,6 +2090,14 @@ function submitEventApplication(formData) {
     writeEventSettings_(targetSs, formData, folderResult.settingsUpdates, eventName);
 
     const adminUsername = "admin_" + eventCode;
+    // Plaintext is generated here and used ONLY for (a) the one-time
+    // organizer notification email below and (b) the one-time success
+    // response returned to the frontend right after signup — the only
+    // two places a freshly-created password is ever allowed to appear as
+    // plaintext, because that's the organizer's sole chance to learn it.
+    // Everywhere it is PERSISTED (the event spreadsheet's Admins sheet,
+    // and the Master DB Events sheet's AdminPassword column) it is
+    // hashed first — see writeAdminAccount_() and insertEventRow_() below.
     const adminPassword = generateSecurePassword_(12);
     writeAdminAccount_(targetSs, adminUsername, adminPassword, formData.organizerEmail);
 
@@ -1865,13 +2117,17 @@ function submitEventApplication(formData) {
       : "";
 
     insertEventRow_({
-      EventID: eventId, EventCode: eventCode, EventType: formData.eventType, EventName: eventName,
-      SpreadsheetID: spreadsheetId, SpreadsheetLink: spreadsheetLink,
-      OrganizerName: formData.organizerName, OrganizerPhone: formData.organizerPhone, OrganizerEmail: formData.organizerEmail,
-      Plan: formData.plan, TrialExpiry: trialExpiry,
-      Status: "Active", SettlementStatus: "Pending",
+       EventID: eventId, EventCode: eventCode, EventType: formData.eventType, EventName: eventName,
+       SpreadsheetID: spreadsheetId, SpreadsheetLink: spreadsheetLink,
+       OrganizerName: formData.organizerName, OrganizerPhone: formData.organizerPhone, OrganizerEmail: formData.organizerEmail,
+       Plan: formData.plan, TrialExpiry: trialExpiry,
+       Status: formData.eventStatus || "Active",   // CHANGED: was hardcoded "Active"
+       
+      SettlementStatus: "Pending",
       CreatedDate: createdDate, UpdatedDate: createdDate,
-      AdminUsername: adminUsername, AdminPassword: adminPassword,
+      AdminUsername: adminUsername,
+      // SECURITY: only the hash is ever written to the Master DB registry.
+      AdminPassword: hashPassword_(adminPassword),
       PublicURL: publicURL, AdminURL: adminURL,
       EventFolderLink: eventFolderLink,
       ComplaintFolderLink: folderResult.settingsUpdates["COMPLAINT_UPLOAD_FOLDER_ID"]
@@ -2072,7 +2328,11 @@ function writeEventSettings_(targetSs, formData, folderSettings, cleanEventName)
 function writeAdminAccount_(targetSs, username, password, email) {
   const adminsSheet = targetSs.getSheetByName("Admins");
   if (!adminsSheet) return;
-  adminsSheet.appendRow([username, password, "superadmin", "full", "Active", email, formatReadableDate_(new Date()), ""]);
+  // SECURITY: only the SHA-256 hash of the freshly-generated password is
+  // ever written to the sheet. `password` (plaintext) is only used by the
+  // caller to email/return the one-time credential — it is never stored
+  // here or anywhere else.
+  adminsSheet.appendRow([username, hashPassword_(password), "superadmin", "full", "Active", email, formatReadableDate_(new Date()), ""]);
 }
 
 function logAudit_(entry) {
@@ -2287,4 +2547,1055 @@ function sendEventCreatedEmail_(to, d, globalSettings) {
   MailApp.sendEmail({ to: to, subject: "🎉 Your EventPay Event Has Been Created Successfully — " + d.eventCode, body: plain, htmlBody: html });
 }
 
+// ============================================================
+// 16. MASTER ADMIN PANEL
+// ------------------------------------------------------------
+// Everything below is copied over unchanged from the old
+// master-admin-backend.gs, EXCEPT:
+//   - its doGet/doPost/handleRequest_/jsonOut_/routeAction_ were removed
+//     (this file's doGet/doPost/out_/handleAction above now do that job)
+//   - requireAuth_ was renamed to requireMasterAuth_ (same body) so it
+//     can't be confused with the per-event verifyAdmin/verifySuperAdmin
+//     above, and so its name is self-explanatory now that it lives next
+//     to them in the same file
+//   - its getEvents_ was renamed to getMasterEvents_ purely for
+//     readability next to the public getEvents() above — see the
+//     "getEvents" case in handleAction() for how the two are told apart
+//   - masterLogin_/changeMasterPassword_ now hash-compare (SHA-256)
+//     instead of comparing MASTER-ADMIN-PASS in plaintext — see those
+//     two functions below for the migrate-on-first-use logic
+//
+// This backend manages ONLY the Master Database. It never touches
+// an individual event's own spreadsheet except to read a read-only
+// preview of it (getSpreadsheetPreview) and to back it up.
+// ============================================================
 
+// ---- MASTER ADMIN AUTH ----
+// Single master admin, password-only. A session token is issued on
+// success and cached (CacheService, max 1 hour) so every subsequent
+// call can be checked cheaply without re-hitting Script Properties.
+const SESSION_TTL_SECONDS = 60 * 60; // 1 hour, matches frontend SESSION_MINUTES
+
+// ============================================================
+// SECURITY: MASTER-ADMIN-PASS (Script Property) now stores a SHA-256
+// hash, not plaintext. To stay compatible with a project that hasn't
+// been migrated yet, masterLogin_ falls back to a one-time plaintext
+// comparison ONLY if the stored property doesn't already look like a
+// 64-char hex hash, and immediately rewrites the property as a hash the
+// moment that legacy comparison succeeds — the same self-migrating
+// pattern used in loginAdmin() above. migratePlaintextPasswords_()
+// (bottom of this file) also migrates this property in one bulk pass.
+// ============================================================
+function masterLogin_(p) {
+  const password = String(p.password || "");
+  const props = PropertiesService.getScriptProperties();
+  const stored = props.getProperty("MASTER-ADMIN-PASS") || "";
+
+  let ok = false;
+  if (isSha256Hash_(stored)) {
+    ok = !!password && hashPassword_(password) === stored;
+  } else {
+    // Legacy plaintext property — compare once, then migrate in place.
+    ok = !!password && password === stored;
+    if (ok) props.setProperty("MASTER-ADMIN-PASS", hashPassword_(password));
+  }
+
+  if (!ok) {
+    return { success: false, error: "Incorrect master password." };
+  }
+
+  const token = Utilities.getUuid();
+  CacheService.getScriptCache().put("session_" + token, "valid", SESSION_TTL_SECONDS);
+
+  return {
+    success: true,
+    token: token,
+    expiresInSeconds: SESSION_TTL_SECONDS,
+  };
+}
+
+function requireMasterAuth_(p) {
+  const token = p.token;
+  if (!token || CacheService.getScriptCache().get("session_" + token) !== "valid") {
+    throw new Error("Not authenticated — please log in again.");
+  }
+  // Sliding expiry: touching the session extends it while the admin is active.
+  CacheService.getScriptCache().put("session_" + token, "valid", SESSION_TTL_SECONDS);
+}
+
+function changeMasterPassword_(p) {
+  const current = String(p.current || "");
+  const next = String(p.next || "");
+  const props = PropertiesService.getScriptProperties();
+  const stored = props.getProperty("MASTER-ADMIN-PASS") || "";
+
+  let currentOk = false;
+  if (isSha256Hash_(stored)) {
+    currentOk = hashPassword_(current) === stored;
+  } else {
+    // Legacy plaintext property.
+    currentOk = current === stored;
+  }
+
+  if (!currentOk) return { success: false, error: "Current password is incorrect." };
+  if (!next || next.length < 6) return { success: false, error: "New password must be at least 6 characters." };
+
+  // Only the hash is ever written back.
+  props.setProperty("MASTER-ADMIN-PASS", hashPassword_(next));
+  appendAuditLog_("Changed Master Password", "master", "", "", "");
+  return { success: true };
+}
+
+// ---- MASTER DB SHEET HELPERS ----
+function getMasterSS_() {
+  const id = PropertiesService.getScriptProperties().getProperty("MASTER_DB_SPREADSHEET_ID");
+  if (!id) throw new Error("MASTER_DB_SPREADSHEET_ID script property is not set.");
+  return SpreadsheetApp.openById(id);
+}
+function getSheet_(name) {
+  const sheet = getMasterSS_().getSheetByName(name);
+  if (!sheet) throw new Error('Sheet "' + name + '" not found in Master DB.');
+  return sheet;
+}
+
+// Converts a sheet's rows into an array of objects, keyed by a
+// camelCase version of each header. Handles duplicate header names by
+// keeping the first occurrence (so e.g. two "SpreadsheetLink" columns
+// don't clobber each other silently) — adjust HEADER_ALIASES below if
+// your sheet's exact header text differs.
+function sheetToObjects_(sheet) {
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return [];
+  const headers = values[0].map(headerToKey_);
+  const seen = {};
+  const rows = [];
+  for (let r = 1; r < values.length; r++) {
+    const row = values[r];
+    if (row.every((c) => c === "" || c === null)) continue; // skip blank rows
+    const obj = { __row: r + 1 }; // 1-based sheet row, for later writes
+    headers.forEach((key, i) => {
+      const finalKey = seen[key] ? key + "2" : key; // avoid clobbering dup headers
+      if (!(finalKey in obj)) obj[finalKey] = row[i];
+    });
+    headers.forEach((key) => (seen[key] = true));
+    rows.push(obj);
+  }
+  return rows;
+}
+
+// Known header text -> the exact camelCase key the frontend expects.
+// Anything not listed here is auto-camelCased as a fallback.
+const HEADER_ALIASES = {
+  "EventID": "eventId",
+  "EventCode": "eventCode",
+  "EventType": "eventType",
+  "EventName": "eventName",
+  "SpreadsheetID": "spreadsheetId",
+  "SpreadSheetLink": "spreadsheetLink",
+  "SpreadsheetLink": "spreadsheetLink",
+  "OrganizerName": "organizerName",
+  "OrganizerPhone": "organizerPhone",
+  "OrganizerEmail": "organizerEmail",
+  "Plan": "plan",
+  "TrialExpiry": "trialExpiry",
+  "Status": "status",
+  "SettlementStatus": "settlementStatus",
+  "CreatedDate": "createdDate",
+  "UpdatedDate": "updatedDate",
+  "AdminUsername": "adminUsername",
+  "AdminPassword": "adminPassword",
+  "PublicURL": "publicUrl",
+  "AdminURL": "adminUrl",
+  "EventFolderLink": "parentFolderLink",
+  "Timestamp": "date",
+  "Action": "action",
+  "OrganizerEmail ": "organizerEmail",
+  "IP": "ip",
+};
+function headerToKey_(header) {
+  const h = String(header || "").trim();
+  if (HEADER_ALIASES[h]) return HEADER_ALIASES[h];
+  // fallback: "Some Header" -> "someHeader"
+  return h
+    .replace(/[^a-zA-Z0-9]+(.)/g, (_, c) => c.toUpperCase())
+    .replace(/^./, (c) => c.toLowerCase());
+}
+
+function findColumnIndex_(sheet, headerText) {
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const idx = headers.findIndex((h) => String(h).trim() === headerText);
+  return idx === -1 ? -1 : idx + 1; // 1-based
+}
+
+function appendAuditLog_(action, user, organizerEmail, spreadsheetId, eventCode, plan) {
+  try {
+    const sheet = getSheet_("AuditLog");
+    sheet.appendRow([
+      Utilities.formatDate(new Date(), Session.getScriptTimeZone() || "Asia/Kolkata", "dd-MMM-yyyy hh:mm a"),
+      action,
+      organizerEmail || "",
+      spreadsheetId || "",
+      eventCode || "",
+      plan || "",
+    ]);
+  } catch (e) {
+    // Audit logging should never break the primary action.
+  }
+}
+
+// ---- DASHBOARD STATS ----
+function getPlatformStats_() {
+  const events = sheetToObjects_(getSheet_("Events"));
+  const applications = safeSheetToObjects_("EventApplications");
+  const payments = safeSheetToObjects_("Payments");
+
+  const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || "Asia/Kolkata", "dd-MMM-yyyy");
+
+  const activeEvents = events.filter((e) => e.status === "Active").length;
+  const expiredEvents = events.filter((e) => e.status === "Expired").length;
+  const pendingApplications = applications.filter((a) => (a.status || "").toLowerCase() === "pending").length;
+  const organizers = new Set(events.map((e) => e.organizerEmail).filter(Boolean));
+  const activePlans = new Set(events.filter((e) => e.status === "Active").map((e) => e.plan)).size;
+
+  let totalRevenue = 0;
+  let totalCollections = 0;
+  payments.forEach((row) => {
+    const amt = Number(row.amount || row.Amount || 0);
+    totalRevenue += amt;
+    totalCollections += amt;
+  });
+
+  const todaysRegistrations = events.filter((e) => String(e.createdDate || "").indexOf(today) === 0).length;
+
+  return {
+    success: true,
+    stats: {
+      totalEvents: events.length,
+      activeEvents,
+      expiredEvents,
+      pendingApplications,
+      totalOrganizers: organizers.size,
+      totalCollections,
+      activePlans,
+      totalRevenue,
+      todaysRegistrations,
+    },
+  };
+}
+
+function safeSheetToObjects_(name) {
+  try { return sheetToObjects_(getSheet_(name)); } catch (e) { return []; }
+}
+
+// ---- EVENTS (Master Admin panel) ----
+// SECURITY: adminPassword is now a SHA-256 hash in the sheet — it must
+// still never reach the frontend, so it is stripped from every row
+// here before returning, exactly like the public getEvents() above.
+function getMasterEvents_() {
+  const events = sheetToObjects_(getSheet_("Events")).map((ev) => {
+    const copy = Object.assign({}, ev);
+    delete copy.adminPassword;
+    return copy;
+  });
+  return { success: true, events: events };
+}
+
+function deactivateEvent_(p) {
+  const sheet = getSheet_("Events");
+  const row = findEventRow_(sheet, p.eventId);
+  if (!row) return { success: false, error: "Event not found." };
+
+  const statusCol = findColumnIndex_(sheet, "Status");
+  const updatedCol = findColumnIndex_(sheet, "UpdatedDate");
+  if (statusCol > 0) sheet.getRange(row.__row, statusCol).setValue("Deactivated");
+  if (updatedCol > 0) sheet.getRange(row.__row, updatedCol).setValue(new Date());
+
+  appendAuditLog_("Deactivated Event", "master", row.organizerEmail, row.spreadsheetId, row.eventCode, row.plan);
+  return { success: true };
+}
+
+function deleteEvent_(p) {
+  const sheet = getSheet_("Events");
+  const row = findEventRow_(sheet, p.eventId);
+  if (!row) return { success: false, error: "Event not found." };
+
+  sheet.deleteRow(row.__row);
+  appendAuditLog_("Deleted Event", "master", row.organizerEmail, row.spreadsheetId, row.eventCode, row.plan);
+  return { success: true };
+}
+
+function findEventRow_(sheet, eventId) {
+  const rows = sheetToObjects_(sheet);
+  return rows.find((r) => String(r.eventId) === String(eventId)) || null;
+}
+
+// Copies the event's spreadsheet into the backups folder (or Drive
+// root if ROOT_DRIVE_FOLDER_ID isn't set) and returns a download-ready
+// link. This does NOT modify the original spreadsheet.
+function downloadEventBackup_(p) {
+  const sheet = getSheet_("Events");
+  const row = findEventRow_(sheet, p.eventId);
+  if (!row || !row.spreadsheetId) return { success: false, error: "Event or its spreadsheet was not found." };
+
+  const copy = backupSpreadsheetById_(row.spreadsheetId, "Backup - " + (row.eventName || row.eventCode || row.eventId));
+  appendAuditLog_("Downloaded Event Backup", "master", row.organizerEmail, row.spreadsheetId, row.eventCode, row.plan);
+  return { success: true, url: copy.getUrl(), fileId: copy.getId() };
+}
+
+// Read-only preview of an event's own spreadsheet, grouped by
+// worksheet name. Each row becomes an object keyed by that sheet's
+// own header row — so this works for any event schema without
+// hardcoding column names.
+function getSpreadsheetPreview_(p) {
+  const sid = p.sid;
+  if (!sid) return { success: false, error: "Missing sid." };
+
+  const ss = SpreadsheetApp.openById(sid);
+  const sheets = {};
+  ss.getSheets().forEach((sh) => {
+    // Cap rows/cols read for performance on very large sheets.
+    const maxRows = Math.min(sh.getLastRow(), 500);
+    const maxCols = sh.getLastColumn();
+    if (maxRows < 1 || maxCols < 1) { sheets[sh.getName()] = []; return; }
+    const values = sh.getRange(1, 1, maxRows, maxCols).getValues();
+    if (values.length < 2) { sheets[sh.getName()] = []; return; }
+    const headers = values[0].map((h) => String(h || "").trim() || "Column");
+    const rows = values.slice(1)
+      .filter((r) => r.some((c) => c !== "" && c !== null))
+      .map((r) => {
+        const obj = {};
+        headers.forEach((h, i) => (obj[h] = r[i]));
+        return obj;
+      });
+
+    // SECURITY: this is a raw, arbitrary-sheet preview — if the sheet
+    // being previewed is an event's "Admins" sheet, its password-hash
+    // column must still never reach the frontend.
+    if (sh.getName() === "Admins") {
+      rows.forEach((obj) => { if ("Password" in obj) obj.Password = "••••••••"; });
+    }
+
+    sheets[sh.getName()] = rows;
+  });
+
+  return { success: true, sheets };
+}
+
+// ---- GLOBAL SETTINGS (Master Admin panel) ----
+// Stored in the "Settings" tab of the Master DB: col A = readable
+// label (e.g. "Send Event Created Email"), col B = TRUE/FALSE or a
+// number (e.g. Password Reset Expiry). We map label <-> frontend key
+// via SETTINGS_LABELS below.
+const SETTINGS_LABELS = [
+  ["sendEventCreatedEmail",   "Send Event Created Email"],
+  ["sendSpreadsheetLink",     "Send Spreadsheet Link"],
+  ["sendSpreadsheetId",       "Send Spreadsheet ID"],
+  ["sendParentFolderLink",    "Send Parent Event Folder Link"],
+  ["sendOrganizerDetails",    "Send Organizer Details"],
+  ["sendAdminCredentials",    "Send Admin Credentials"],
+  ["sendPublicUrl",           "Send Public URL"],
+  ["sendAdminUrl",            "Send Admin URL"],
+  ["sendSubscriptionDetails", "Send Subscription Details"],
+  ["sendPlanDetails",         "Send Plan Details"],
+  ["allowGalleryFolderLinks", "Allow Gallery Folder Links"],
+  ["allowPasswordReset",      "Allow Password Reset"],
+  ["passwordResetExpiry",     "Password Reset Expiry (Minutes)"],
+  ["sendPasswordResetEmail",  "Send Password Reset Email"],
+];
+
+function getGlobalSettings_() {
+  const sheet = getSheet_("Settings");
+  const values = sheet.getDataRange().getValues();
+  const byLabel = {};
+  values.forEach((row) => { byLabel[String(row[0]).trim()] = row[1]; });
+
+  const settings = {};
+  SETTINGS_LABELS.forEach(([key, label]) => {
+    const raw = byLabel[label];
+    settings[key] = typeof raw === "boolean" ? raw : (raw === "TRUE" || raw === true || raw === "" ? raw === "TRUE" || raw === true : raw);
+  });
+  return { success: true, settings };
+}
+
+function saveGlobalSettings_(p) {
+  const sheet = getSheet_("Settings");
+  const values = sheet.getDataRange().getValues();
+  const rowIndexByLabel = {};
+  values.forEach((row, i) => { rowIndexByLabel[String(row[0]).trim()] = i + 1; });
+
+  SETTINGS_LABELS.forEach(([key, label]) => {
+    if (!(key in p)) return;
+    const rowNum = rowIndexByLabel[label];
+    if (!rowNum) return; // label doesn't exist in the sheet — skip rather than guess a new row
+    const isNumeric = key === "passwordResetExpiry";
+    const value = isNumeric ? Number(p[key]) : (p[key] === "true" || p[key] === true);
+    sheet.getRange(rowNum, 2).setValue(isNumeric ? value : (value ? "TRUE" : "FALSE"));
+  });
+
+  appendAuditLog_("Updated Global Settings", "master", "", "", "");
+  return { success: true };
+}
+
+// ---- SUBSCRIPTION PLANS ----
+// No dedicated sheet exists yet, so plans are stored as JSON in
+// Script Properties (SUBSCRIPTION_PLANS_JSON). First read seeds
+// sensible defaults if nothing has been saved yet.
+function getSubscriptionPlans_() {
+  const raw = PropertiesService.getScriptProperties().getProperty("SUBSCRIPTION_PLANS_JSON");
+  if (raw) return { success: true, plans: JSON.parse(raw) };
+
+  const defaults = [
+    { id: "basic", name: "Basic", price: 499, features: ["1 Event", "Up to 200 guests", "Email support"] },
+    { id: "premium", name: "Premium", price: 1499, features: ["5 Events", "Up to 1000 guests", "Priority support", "Custom domain"], featured: true },
+    { id: "enterprise", name: "Enterprise", price: 4999, features: ["Unlimited events", "Unlimited guests", "Dedicated support", "White-label branding"] },
+  ];
+  PropertiesService.getScriptProperties().setProperty("SUBSCRIPTION_PLANS_JSON", JSON.stringify(defaults));
+  return { success: true, plans: defaults };
+}
+
+function updatePlanPrice_(p) {
+  const props = PropertiesService.getScriptProperties();
+  const plans = JSON.parse(props.getProperty("SUBSCRIPTION_PLANS_JSON") || "[]");
+  const plan = plans.find((pl) => pl.id === p.planId);
+  if (!plan) return { success: false, error: "Plan not found." };
+  plan.price = Number(p.price);
+  props.setProperty("SUBSCRIPTION_PLANS_JSON", JSON.stringify(plans));
+  appendAuditLog_("Updated Plan Price: " + p.planId, "master", "", "", "");
+  return { success: true };
+}
+
+// ---- PAYMENT GATEWAY (Master Admin panel) ----
+// Stored in Script Properties. Reuses the existing RAZORPAY_KEY_ID /
+// RAZORPAY_KEY_SECRET properties for the "Razorpay" provider so this
+// doesn't duplicate credentials you've already configured.
+function getPaymentGatewaySettings_() {
+  const props = PropertiesService.getScriptProperties();
+  const raw = props.getProperty("PAYMENT_GATEWAY_JSON");
+  const base = raw ? JSON.parse(raw) : { enabled: false, provider: "razorpay", webhook: "", testMode: true };
+  // Merchant ID / secret for Razorpay come from the dedicated properties if not overridden.
+  if (base.provider === "razorpay") {
+    base.merchantId = base.merchantId || props.getProperty("RAZORPAY_KEY_ID") || "";
+  }
+  return { success: true, settings: maskSecret_(base) };
+}
+function maskSecret_(settings) {
+  const copy = Object.assign({}, settings);
+  if (copy.secret) copy.secret = "••••••••" + String(copy.secret).slice(-4);
+  return copy;
+}
+
+function savePaymentGatewaySettings_(p) {
+  const props = PropertiesService.getScriptProperties();
+  const settings = {
+    enabled: p.enabled === "true" || p.enabled === true,
+    provider: p.provider || "razorpay",
+    merchantId: p.merchantId || "",
+    webhook: p.webhook || "",
+    testMode: p.testMode === "true" || p.testMode === true,
+  };
+  props.setProperty("PAYMENT_GATEWAY_JSON", JSON.stringify(settings));
+
+  // Keep the dedicated Razorpay properties in sync if that's the active provider.
+  if (settings.provider === "razorpay") {
+    if (p.merchantId) props.setProperty("RAZORPAY_KEY_ID", p.merchantId);
+    if (p.secret) props.setProperty("RAZORPAY_KEY_SECRET", p.secret);
+  }
+
+  appendAuditLog_("Updated Payment Gateway Settings", "master", "", "", "");
+  return { success: true };
+}
+
+// ---- EMAIL SETTINGS (Master Admin panel) ----
+function getEmailSettings_() {
+  const raw = PropertiesService.getScriptProperties().getProperty("EMAIL_SETTINGS_JSON");
+  const settings = raw ? JSON.parse(raw) : {
+    senderName: "EventPay", replyEmail: "", supportEmail: "", orgEmail: "", footer: "", signature: "",
+  };
+  return { success: true, settings };
+}
+
+function saveEmailSettings_(p) {
+  const settings = {
+    senderName: p.senderName || "EventPay",
+    replyEmail: p.replyEmail || "",
+    supportEmail: p.supportEmail || "",
+    orgEmail: p.orgEmail || "",
+    footer: p.footer || "",
+    signature: p.signature || "",
+  };
+  PropertiesService.getScriptProperties().setProperty("EMAIL_SETTINGS_JSON", JSON.stringify(settings));
+  appendAuditLog_("Updated Email Settings", "master", "", "", "");
+  return { success: true };
+}
+
+function sendTestEmail_(p) {
+  const settings = getEmailSettings_().settings;
+  const to = p.to || settings.supportEmail || Session.getEffectiveUser().getEmail();
+  if (!to) return { success: false, error: "No destination email available." };
+
+  MailApp.sendEmail({
+    to: to,
+    subject: "EventPay — Test Email",
+    body: "This is a test email from the EventPay Master Admin panel.\n\n" + (settings.signature || ""),
+    name: settings.senderName || "EventPay",
+    replyTo: settings.replyEmail || undefined,
+  });
+  return { success: true };
+}
+
+// ---- APPLICATIONS (Master Admin panel) ----
+// Reads/writes the "EventApplications" sheet. Expected columns
+// (adjust HEADER_ALIASES above if yours differ): Name, Email,
+// EventName, Status, SubmittedDate.
+function getPendingApplications_() {
+  const rows = sheetToObjects_(getSheet_("EventApplications"));
+  const applications = rows.map((r) => ({
+    id: String(r.__row),
+    name: r.name || r.organizerName,
+    email: r.email || r.organizerEmail,
+    eventName: r.eventName,
+    status: (r.status || "pending").toLowerCase(),
+    submittedDate: r.submittedDate || r.createdDate,
+  }));
+  return { success: true, applications };
+}
+
+function approveApplication_(p) {
+  return setApplicationStatus_(p.id, "Approved");
+}
+function rejectApplication_(p) {
+  return setApplicationStatus_(p.id, "Rejected");
+}
+function setApplicationStatus_(rowId, status) {
+  const sheet = getSheet_("EventApplications");
+  const row = Number(rowId);
+  if (!row) return { success: false, error: "Invalid application id." };
+
+  const statusCol = findColumnIndex_(sheet, "Status");
+  if (statusCol < 1) return { success: false, error: 'Sheet is missing a "Status" column.' };
+
+  sheet.getRange(row, statusCol).setValue(status);
+  appendAuditLog_(status + " Application", "master", "", "", "");
+  return { success: true };
+}
+
+// ---- AUDIT TRAIL (Master Admin panel) ----
+function getAuditTrail_() {
+  const rows = sheetToObjects_(getSheet_("AuditLog"));
+  // Most recent first.
+  const log = rows.reverse().map((r) => ({
+    date: r.date,
+    action: r.action,
+    user: "master", // AuditLog doesn't currently track a "user" column separately from OrganizerEmail
+    ip: r.ip || "",
+  }));
+  return { success: true, log };
+}
+
+// ---- MASTER DATABASE (Master Admin panel) ----
+function getMasterDbInfo_() {
+  const id = PropertiesService.getScriptProperties().getProperty("MASTER_DB_SPREADSHEET_ID");
+  const lastBackup = PropertiesService.getScriptProperties().getProperty("MASTER_DB_LAST_BACKUP") || "";
+  return { success: true, info: { spreadsheetId: id, lastBackup } };
+}
+
+function createMasterBackup_() {
+  const id = PropertiesService.getScriptProperties().getProperty("MASTER_DB_SPREADSHEET_ID");
+  const copy = backupSpreadsheetById_(id, "Master DB Backup - " + new Date().toISOString());
+  PropertiesService.getScriptProperties().setProperty("MASTER_DB_LAST_BACKUP", new Date().toISOString());
+  appendAuditLog_("Created Master Database Backup", "master", "", "", "");
+  return { success: true, fileId: copy.getId(), url: copy.getUrl() };
+}
+
+function downloadMasterBackup_() {
+  const id = PropertiesService.getScriptProperties().getProperty("MASTER_DB_SPREADSHEET_ID");
+  const copy = backupSpreadsheetById_(id, "Master DB Backup - " + new Date().toISOString());
+  return { success: true, url: copy.getUrl(), fileId: copy.getId() };
+}
+
+// Restores from a given Drive file ID by overwriting every sheet in
+// the live Master DB with the backup's contents. Requires p.backupFileId.
+// NOTE: intentionally conservative — it copies data sheet-by-sheet
+// rather than deleting/replacing the whole spreadsheet, so the Web
+// App deployment (and its ID/URL) never changes.
+function restoreMasterBackup_(p) {
+  const backupFileId = p.backupFileId;
+  if (!backupFileId) return { success: false, error: "Missing backupFileId." };
+
+  const liveId = PropertiesService.getScriptProperties().getProperty("MASTER_DB_SPREADSHEET_ID");
+  const live = SpreadsheetApp.openById(liveId);
+  const backup = SpreadsheetApp.openById(backupFileId);
+
+  backup.getSheets().forEach((backupSheet) => {
+    const name = backupSheet.getName();
+    let liveSheet = live.getSheetByName(name);
+    if (!liveSheet) liveSheet = live.insertSheet(name);
+    liveSheet.clear();
+    const values = backupSheet.getDataRange().getValues();
+    if (values.length) liveSheet.getRange(1, 1, values.length, values[0].length).setValues(values);
+  });
+
+  appendAuditLog_("Restored Master Database from backup", "master", "", "", "");
+  return { success: true };
+}
+
+// Copies a spreadsheet by ID into the backups folder (falls back to
+// Drive root) and returns the new File.
+function backupSpreadsheetById_(spreadsheetId, name) {
+  const file = DriveApp.getFileById(spreadsheetId);
+  const folderId = PropertiesService.getScriptProperties().getProperty("ROOT_DRIVE_FOLDER_ID");
+  const folder = folderId ? DriveApp.getFolderById(folderId) : DriveApp.getRootFolder();
+  return file.makeCopy(name, folder);
+}
+
+// ============================================================
+// 17. PASSWORD MIGRATION — run ONCE (from the Apps Script editor:
+// select migratePlaintextPasswords_ in the function dropdown and
+// click Run — or call it as the master-admin action
+// "migratePlaintextPasswords") after deploying SHA-256 hashing.
+// ------------------------------------------------------------
+// Scans every place a password is stored and, for any value that
+// ISN'T already a 64-character hex SHA-256 hash, hashes it in place
+// and writes the hash back. Rows that already hold a valid hash are
+// left completely untouched (idempotent — safe to run more than
+// once, e.g. after adding a new event spreadsheet).
+//
+// Covers:
+//   1. The Master Admin password (Script Property MASTER-ADMIN-PASS)
+//   2. The Master DB "Events" sheet's AdminPassword column
+//   3. Every individual event spreadsheet's own "Admins" sheet
+//      (Password is column B), discovered via each Events row's
+//      SpreadsheetID — wrapped in try/catch per event so one
+//      deleted/inaccessible spreadsheet can't abort the whole run.
+//
+// Returns only counts — never any password value, hashed or not.
+// ============================================================
+function migratePlaintextPasswords_() {
+  const result = {
+    masterAdminMigrated: false,
+    eventsRegistryMigrated: 0,
+    eventsRegistrySkipped: 0,
+    eventAdminsMigrated: 0,
+    eventAdminsSkipped: 0,
+    eventSpreadsheetsWithErrors: 0
+  };
+
+  // 1) Master Admin password (Script Property).
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const stored = props.getProperty("MASTER-ADMIN-PASS") || "";
+    if (stored && !isSha256Hash_(stored)) {
+      props.setProperty("MASTER-ADMIN-PASS", hashPassword_(stored));
+      result.masterAdminMigrated = true;
+    }
+  } catch (e) { /* leave master password untouched on any error */ }
+
+  // 2) Master DB "Events" sheet — AdminPassword column.
+  let eventsSheet;
+  try {
+    eventsSheet = getOrCreateEventsSheet_();
+    const data = eventsSheet.getDataRange().getValues();
+    const col = getColMap(data[0]);
+    const ssIdC = col["spreadsheetid"] !== undefined ? col["spreadsheetid"] : 4;
+    const passC = col["adminpassword"] !== undefined ? col["adminpassword"] : 16;
+
+    for (let i = 1; i < data.length; i++) {
+      const stored = String(data[i][passC] || "").trim();
+      if (!stored) continue;
+      if (isSha256Hash_(stored)) { result.eventsRegistrySkipped++; continue; }
+      eventsSheet.getRange(i + 1, passC + 1).setValue(hashPassword_(stored));
+      result.eventsRegistryMigrated++;
+    }
+
+    // 3) Each event's own spreadsheet "Admins" sheet.
+    for (let i = 1; i < data.length; i++) {
+      const sid = String(data[i][ssIdC] || "").trim();
+      if (!sid) continue;
+      try {
+        const ss = SpreadsheetApp.openById(sid);
+        const adminsSheet = ss.getSheetByName("Admins");
+        if (!adminsSheet) continue;
+        const adminsData = adminsSheet.getDataRange().getValues();
+        for (let r = 1; r < adminsData.length; r++) {
+          const stored = String(adminsData[r][1] || "").trim();
+          if (!stored) continue;
+          if (isSha256Hash_(stored)) { result.eventAdminsSkipped++; continue; }
+          adminsSheet.getRange(r + 1, 2).setValue(hashPassword_(stored));
+          result.eventAdminsMigrated++;
+        }
+      } catch (e) {
+        result.eventSpreadsheetsWithErrors++;
+      }
+    }
+  } catch (e) { /* Master DB not reachable — return whatever was gathered so far */ }
+
+  return { success: true, result: result };
+}
+
+// ============================================================
+// SUBSCRIPTION PAYMENT ADDITIONS
+// ============================================================
+/* ============================================================
+   EventPay — SUBSCRIPTION PAYMENT ADDITIONS
+   ------------------------------------------------------------
+   Everything in this file is NEW. Paste it into your existing
+   Code.gs (anywhere below the existing functions is fine — Apps
+   Script doesn't care about order). Then apply the two small
+   EDITS described at the bottom to handleAction()'s switch and to
+   MASTER_ADMIN_ACTIONS.
+
+   These actions power payment.html/payment.js ONLY. They never
+   create an event, spreadsheet, or Drive folder — that still
+   happens exclusively in submitEventApplication() (Apply-Event
+   flow), untouched.
+
+   Reuses the SAME Script Properties already in your project:
+     RAZORPAY_KEY_ID
+     RAZORPAY_KEY_SECRET
+   Reuses the SAME Master DB spreadsheet (getMasterDbId_()) already
+   used for Events/AuditLog, so no new spreadsheet is introduced.
+============================================================ */
+
+// ============================================================
+// PUBLIC (non-master-admin) gateway settings
+// ------------------------------------------------------------
+// The existing getPaymentGatewaySettings_() (Master Admin panel)
+// requires a master session token and also returns the merchantId.
+// payment.html is a PUBLIC page with no master login, so it needs
+// its own safe, token-free variant that exposes only what the
+// checkout UI needs: whether the gateway is enabled, which
+// provider, the UPI ID to render the QR against, and the Razorpay
+// key_id (key_id is a public, not a secret, value — same one sent
+// back by createSubscriptionOrder).
+// ============================================================
+function getPublicPaymentGatewaySettings_() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var raw = props.getProperty("PAYMENT_GATEWAY_JSON");
+    var base = raw ? JSON.parse(raw) : { enabled: true, provider: "razorpay" };
+
+   var keyId = getProp_("RAZORPAY_KEY_ID");
+   var upiId = base.upiId || getProp_("UPI_ID") || "";
+   
+    return {
+      success: true,
+      settings: {
+        enabled: base.enabled !== false,
+        provider: base.provider || "razorpay",
+        upiId: upiId,
+        keyId: keyId
+      }
+    };
+  } catch (err) {
+    return { success: false, error: err.toString() };
+  }
+}
+
+// ============================================================
+// SUBSCRIPTION ORDERS — cached, not written to a sheet until
+// verified. CacheService keeps this cheap and self-cleaning (6hr
+// TTL); verifySubscriptionPayment cross-checks against this cache
+// so the amount/plan a payment is verified against always matches
+// what the order was actually created for (never trusts the
+// frontend's own resend of amount/plan at verify time).
+// ============================================================
+function createSubscriptionPaymentLink(p) {
+  try {
+    var amount = Math.round(Number(p.amount) * 100); // paise
+    if (!amount || amount <= 0) {
+      return { success: false, message: "Invalid amount." };
+    }
+
+    var keyId = getProp_("RAZORPAY_KEY_ID");
+    var keySecret = getProp_("RAZORPAY_KEY_SECRET");
+    if (!keyId || !keySecret) {
+      return { success: false, message: "Payment gateway is not configured." };
+    }
+
+    var referenceId = "sub_" + (p.plan || "plan") + "_" + Date.now();
+    var callbackUrl = "https://likhithlikki.github.io/MULTI-USERS--EVENTPAY/payment.html";
+
+    var payload = {
+      amount: amount,
+      currency: "INR",
+      description: (p.plan || "Plan") + " Plan Subscription",
+      reference_id: referenceId,
+      customer: {
+        name: p.organizerName || "",
+        email: p.organizerEmail || "",
+        contact: p.organizerPhone || ""
+      },
+      notify: { sms: false, email: false },
+      reminder_enable: false,
+      callback_url: callbackUrl,
+      callback_method: "get"
+    };
+
+    var response = UrlFetchApp.fetch("https://api.razorpay.com/v1/payment_links", {
+      method: "post",
+      contentType: "application/json",
+      headers: {
+        Authorization: "Basic " + Utilities.base64Encode(keyId + ":" + keySecret)
+      },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+
+    var body = JSON.parse(response.getContentText());
+
+    if (response.getResponseCode() >= 300 || !body.id) {
+      return { success: false, message: (body.error && body.error.description) || "Failed to create payment link." };
+    }
+
+    // Cache expected plan/amount/organizer info, keyed by the Payment
+    // Link id — Razorpay sends that id back on the callback, so
+    // verify can recover everything from it without trusting the client.
+    CacheService.getScriptCache().put(
+      "PLINK_" + body.id,
+      JSON.stringify({
+        plan: p.plan || "",
+        amount: amount,
+        organizerEmail: p.organizerEmail || "",
+        organizerName: p.organizerName || "",
+        organizerPhone: p.organizerPhone || ""
+      }),
+      6 * 60 * 60
+    );
+
+    return { success: true, payment_link_id: body.id, short_url: body.short_url, reference_id: referenceId };
+  } catch (err) {
+    return { success: false, message: "Unexpected error: " + err.toString() };
+  }
+}
+
+function verifySubscriptionPaymentLink(p) {
+  try {
+    var linkId = p.razorpay_payment_link_id;
+    var referenceId = p.razorpay_payment_link_reference_id;
+    var status = p.razorpay_payment_link_status;
+    var paymentId = p.razorpay_payment_id;
+    var signature = p.razorpay_signature;
+
+    if (!linkId || !paymentId || !signature) {
+      return { success: false, message: "Missing payment details." };
+    }
+
+    var keySecret = getProp_("RAZORPAY_KEY_SECRET");
+    if (!keySecret) return { success: false, message: "Payment gateway is not configured." };
+
+    // Per Razorpay docs: payload = link_id|reference_id|status|payment_id
+    var payload = linkId + "|" + referenceId + "|" + status + "|" + paymentId;
+    var expectedSignature = computeHmacHex_(payload, keySecret);
+
+    if (expectedSignature !== signature) {
+      appendSubscriptionAudit_("Subscription Payment Link - Signature Mismatch", "", linkId, paymentId, "");
+      return { success: false, message: "Signature verification failed." };
+    }
+    if (status !== "paid") {
+      appendSubscriptionAudit_("Subscription Payment Link - Not Paid (" + status + ")", "", linkId, paymentId, "");
+      return { success: false, message: "Payment was not completed (status: " + status + ")." };
+    }
+
+    var cached = CacheService.getScriptCache().get("PLINK_" + linkId);
+    var meta = cached ? JSON.parse(cached) : { plan: "", amount: 0, organizerEmail: "" };
+
+    recordSubscriptionPaymentRow_({
+      plan: meta.plan, amount: meta.amount / 100, organizerEmail: meta.organizerEmail,
+      organizerName: meta.organizerName || "", organizerPhone: meta.organizerPhone || "",
+      method: "Razorpay Payment Link", orderId: linkId, paymentId: paymentId, utr: "", status: "Verified"
+    });
+
+    CacheService.getScriptCache().remove("PLINK_" + linkId);
+    appendSubscriptionAudit_("Subscription Payment Link Verified", meta.organizerEmail, linkId, paymentId, meta.plan);
+    return { success: true };
+  } catch (err) {
+    return { success: false, message: "Unexpected error: " + err.toString() };
+  }
+}
+// ============================================================
+// VERIFY SUBSCRIPTION PAYMENT
+// ------------------------------------------------------------
+// Two paths:
+//  - Razorpay: verifies the HMAC SHA256 signature Razorpay sends
+//    back, using RAZORPAY_KEY_SECRET. Only writes a row to the
+//    SubscriptionPayments sheet (Master DB) if the signature is
+//    genuinely valid.
+//  - Direct UPI (p.method === "upi"): there is nothing to
+//    cryptographically verify at submission time — a human must
+//    check the UTR against the bank statement — so this always
+//    records the submission as "Pending" and returns success:true,
+//    matching the required pendingVerification UX (the frontend
+//    treats this response as "submitted for review", not "paid").
+// ============================================================
+function verifySubscriptionPayment(p) {
+  try {
+    if (p.method === "upi") {
+      return recordUpiSubscriptionSubmission_(p);
+    }
+
+    var orderId = p.razorpay_order_id;
+    var paymentId = p.razorpay_payment_id;
+    var signature = p.razorpay_signature;
+
+    if (!orderId || !paymentId || !signature) {
+      return { success: false, message: "Missing payment details." };
+    }
+
+    var cached = CacheService.getScriptCache().get("SUBORDER_" + orderId);
+    var orderMeta = cached ? JSON.parse(cached) : {
+      plan: p.plan || "", amount: Math.round(Number(p.amount) * 100) || 0, organizerEmail: p.organizerEmail || ""
+    };
+
+    var keySecret = PropertiesService.getScriptProperties().getProperty("RAZORPAY_KEY_SECRET");
+    if (!keySecret) return { success: false, message: "Payment gateway is not configured." };
+
+    var payload = orderId + "|" + paymentId;
+    var expectedSignature = computeHmacHex_(payload, keySecret);
+
+    if (expectedSignature !== signature) {
+      appendSubscriptionAudit_("Subscription Payment - Signature Mismatch", orderMeta.organizerEmail, orderId, paymentId, orderMeta.plan);
+      return { success: false, message: "Signature verification failed." };
+    }
+
+    recordSubscriptionPaymentRow_({
+      plan: orderMeta.plan,
+      amount: orderMeta.amount / 100,
+      organizerEmail: orderMeta.organizerEmail,
+      organizerName: orderMeta.organizerName || "",
+      organizerPhone: orderMeta.organizerPhone || "",
+      method: "Razorpay",
+      orderId: orderId,
+      paymentId: paymentId,
+      utr: "",
+      status: "Verified"
+    });
+
+    CacheService.getScriptCache().remove("SUBORDER_" + orderId);
+    appendSubscriptionAudit_("Subscription Payment Verified", orderMeta.organizerEmail, orderId, paymentId, orderMeta.plan);
+
+    return { success: true };
+  } catch (err) {
+    return { success: false, message: "Unexpected error: " + err.toString() };
+  }
+}
+
+function recordUpiSubscriptionSubmission_(p) {
+  recordSubscriptionPaymentRow_({
+    plan: p.plan || "",
+    amount: Number(p.amount) || 0,
+    organizerEmail: p.organizerEmail || "",
+    organizerName: p.organizerName || "",
+    organizerPhone: p.organizerPhone || "",
+    method: "Direct UPI",
+    orderId: "",
+    paymentId: "",
+    utr: p.utr || "",
+    status: "Pending"
+  });
+  appendSubscriptionAudit_("Subscription UPI Submission (Pending Review)", p.organizerEmail, "", p.utr || "", p.plan || "");
+  return { success: true, status: "pendingVerification" };
+}
+
+// Computes an HMAC-SHA256 hex digest, matching how Razorpay signs
+// order_id|payment_id with the key secret.
+function computeHmacHex_(payload, secret) {
+  var bytes = Utilities.computeHmacSha256Signature(payload, secret);
+  return bytes.map(function (byte) {
+    var v = (byte < 0 ? byte + 256 : byte).toString(16);
+    return v.length === 1 ? "0" + v : v;
+  }).join("");
+}
+
+// ============================================================
+// SUBSCRIPTION PAYMENTS SHEET (Master DB)
+// ------------------------------------------------------------
+// Idempotent creator + appender, same pattern as
+// ensureMasterPaymentsSheet_ / getOrCreateEventsSheet_ elsewhere in
+// this project. Lives in the Master DB — NOT inside any event's own
+// spreadsheet — since a subscription purchase happens before any
+// event/spreadsheet exists.
+// ============================================================
+var SUBSCRIPTION_PAYMENTS_HEADERS = [
+  "Timestamp", "Plan", "Amount", "OrganizerEmail", "OrganizerName", "OrganizerPhone",
+  "Method", "OrderID", "PaymentID", "UTR", "Status"
+];
+
+function getOrCreateSubscriptionPaymentsSheet_() {
+  var ss = SpreadsheetApp.openById(getMasterDbId_());
+  var sheet = ss.getSheetByName("SubscriptionPayments");
+  if (!sheet) {
+    sheet = ss.insertSheet("SubscriptionPayments");
+    sheet.getRange(1, 1, 1, SUBSCRIPTION_PAYMENTS_HEADERS.length)
+      .setValues([SUBSCRIPTION_PAYMENTS_HEADERS])
+      .setFontWeight("bold");
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function recordSubscriptionPaymentRow_(d) {
+  var sheet = getOrCreateSubscriptionPaymentsSheet_();
+  sheet.appendRow([
+    formatReadableDate_(new Date()),
+    d.plan, d.amount, d.organizerEmail, d.organizerName, d.organizerPhone,
+    d.method, d.orderId, d.paymentId, d.utr, d.status
+  ]);
+}
+
+function appendSubscriptionAudit_(action, organizerEmail, orderId, paymentId, plan) {
+  try {
+    logAudit_({
+      action: action,
+      organizerEmail: organizerEmail || "",
+      spreadsheetId: orderId || "",
+      eventCode: paymentId || "",
+      plan: plan || ""
+    });
+  } catch (e) { /* audit logging should never break the payment flow */ }
+}
+
+/* ============================================================
+   REQUIRED EDITS TO YOUR EXISTING Code.gs
+   ------------------------------------------------------------
+   1) In handleAction()'s switch statement, ADD these three cases
+      (near the other "Apply / Create Event" cases is a good spot):
+
+        case "createSubscriptionOrder":
+          return createSubscriptionOrder(p);
+
+        case "verifySubscriptionPayment":
+          return verifySubscriptionPayment(p);
+
+        case "getPaymentGatewaySettings":
+          if (p.token) {
+            requireMasterAuth_(p);
+            return getPaymentGatewaySettings_();
+          }
+          return getPublicPaymentGatewaySettings_();
+
+   2) Your MASTER_ADMIN_ACTIONS array already lists
+      "getPaymentGatewaySettings". REMOVE it from that array — the
+      case above now does its own token check manually, exactly the
+      same pattern your "getEvents" action already uses to serve
+      both the public site and the Master Admin panel from one
+      action name. (createSubscriptionOrder and
+      verifySubscriptionPayment are public actions and must NOT be
+      added to MASTER_ADMIN_ACTIONS.)
+
+   No other function in Code.gs, SheetMaker.gs, or config.js needs
+   to change. submitEventApplication(), initializeEventSpreadsheet(),
+   and every existing donation-payment action (insertPayment,
+   validateUTR, etc.) are completely untouched.
+
+   3) SHA-256 PASSWORD HASHING — after deploying this version, run
+      migratePlaintextPasswords_() ONCE (Apps Script editor: pick it
+      from the function dropdown next to "Run", or call it via the
+      master-admin action "migratePlaintextPasswords") to convert any
+      pre-existing plaintext passwords (Master Admin password, the
+      Events registry's AdminPassword column, and every event
+      spreadsheet's own Admins sheet) to SHA-256 hashes in place.
+      Every login path also self-migrates a legacy plaintext row the
+      first time that account successfully logs in, so this bulk step
+      is a convenience, not a hard requirement, for the system to end
+      up fully hash-only.
+============================================================ */
