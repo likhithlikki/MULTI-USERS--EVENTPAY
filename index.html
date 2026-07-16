@@ -224,9 +224,27 @@
       <div class="modal-title">📷 Scan Event QR</div>
       <button class="modal-close" onclick="closeQRScanner()">✕</button>
     </div>
-    <div id="qrReader" style="width:100%;min-height:260px;"></div>
-    <div id="qrScanStatus" style="margin-top:14px;font-size:13px;color:var(--text-muted);text-align:center;">Point your camera at an event QR code…</div>
-  </div>
+   <div id="qrReader" style="width:100%;min-height:260px;"></div>
+
+<div id="qrScanStatus"
+     style="margin-top:14px;font-size:13px;color:var(--text-muted);text-align:center;">
+    Point your camera at an event QR code…
+</div>
+
+<div style="margin-top:14px;text-align:center;">
+    <label for="qrFileInput"
+           class="btn-outline btn-sm"
+           style="display:inline-flex;cursor:pointer;">
+        📁 Upload a photo instead
+    </label>
+
+    <input
+        type="file"
+        id="qrFileInput"
+        accept="image/*"
+        style="display:none;"
+        onchange="handleQRFileUpload(this)">
+</div>
 </div>
 
 <!-- QR GENERATOR MODAL -->
@@ -650,82 +668,238 @@ let qrScannerInstance = null;
 let qrScannerRunning = false;
 
 function findEventByQRValue(text) {
-  const val = String(text || "").trim();
-  if (!val) return null;
-  return allEvents.find(ev => {
-    if (ev.EventCode && String(ev.EventCode).trim() === val) return true;
-    if (ev.EventID && String(ev.EventID).trim() === val) return true;
-    if (ev.PublicURL && val === String(ev.PublicURL).trim()) return true;
-    if (ev.PublicURL && val.indexOf(ev.PublicURL) !== -1) return true;
-    // URL containing "?event=CODE" or similar query params referencing the code
-    if (ev.EventCode && val.indexOf(ev.EventCode) !== -1) return true;
-    return false;
-  }) || null;
+    const val = String(text || "").trim();
+    if (!val) return null;
+
+    return allEvents.find(ev => {
+
+        if (ev.EventCode && String(ev.EventCode).trim() === val)
+            return true;
+
+        if (ev.EventID && String(ev.EventID).trim() === val)
+            return true;
+
+        if (ev.PublicURL && val === String(ev.PublicURL).trim())
+            return true;
+
+        if (ev.PublicURL && val.indexOf(ev.PublicURL) !== -1)
+            return true;
+
+        if (ev.EventCode && val.indexOf(ev.EventCode) !== -1)
+            return true;
+
+        return false;
+
+    }) || null;
 }
+
+function resolveScannedEvent(decodedText) {
+
+    const match = findEventByQRValue(decodedText);
+
+    if (match) {
+
+        toast("Event found — opening " + (match.EventName || "event") + "…", "success");
+
+        selectEvent(null, encodeURIComponent(JSON.stringify(match)));
+
+    } else {
+
+        toast("Event not found.", "error");
+
+    }
+}
+
+  
 
 function onQRScanSuccess(decodedText) {
-  if (!qrScannerRunning) return; // guard against duplicate fires
-  stopQRScanner();
-  closeQRScanner();
 
-  const match = findEventByQRValue(decodedText);
-  if (match) {
-    toast("Event found — opening " + (match.EventName || "event") + "…", "success");
-    selectEvent(null, encodeURIComponent(JSON.stringify(match)));
-  } else {
-    toast("Event not found.", "error");
-  }
+    // Prevent duplicate scan events
+    if (!qrScannerRunning) return;
+
+    qrScannerRunning = false;
+
+    stopQRScanner().then(function () {
+
+        closeQRScanner();
+
+        resolveScannedEvent(decodedText);
+
+    });
+
 }
 
-function openQRScanner(e) {
-  if (e && e.preventDefault) e.preventDefault();
+async function openQRScanner(e) {
 
-  if (typeof Html5Qrcode === "undefined") {
-    toast("QR scanner library failed to load. Check your internet connection.", "error");
-    return;
-  }
+    if (e && e.preventDefault) e.preventDefault();
 
-  document.getElementById("qrScannerModal").classList.add("open");
-  document.getElementById("qrScanStatus").textContent = "Requesting camera access…";
-
-  qrScannerInstance = new Html5Qrcode("qrReader");
-
-  Html5Qrcode.getCameras().then(cameras => {
-    if (!cameras || !cameras.length) {
-      document.getElementById("qrScanStatus").textContent = "No camera found on this device.";
-      return;
+    if (typeof Html5Qrcode === "undefined") {
+        toast("QR scanner library failed to load.", "error");
+        return;
     }
-    const rear = cameras.find(c => /back|rear|environment/i.test(c.label || ""));
-    const camId = rear ? rear.id : cameras[cameras.length - 1].id;
 
-    qrScannerInstance.start(
-      camId,
-      { fps: 10, qrbox: { width: 240, height: 240 } },
-      onQRScanSuccess,
-      () => { /* per-frame scan failures are expected while aiming — ignore */ }
-    ).then(() => {
-      qrScannerRunning = true;
-      document.getElementById("qrScanStatus").textContent = "Point your camera at an event QR code…";
-    }).catch(err => {
-      document.getElementById("qrScanStatus").textContent = "Could not start camera: " + err;
+    // Stop any previous scanner session
+    await stopQRScanner();
+
+    document.getElementById("qrScannerModal").classList.add("open");
+    document.getElementById("qrReader").innerHTML = "";
+    document.getElementById("qrScanStatus").textContent =
+        "Requesting camera access...";
+
+    qrScannerInstance = new Html5Qrcode("qrReader", {
+        verbose: false
     });
-  }).catch(() => {
-    document.getElementById("qrScanStatus").textContent = "Camera access denied or unavailable on this device/browser.";
-  });
+
+    const config = {
+        fps: 10,
+        qrbox: function (viewfinderWidth, viewfinderHeight) {
+            const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+            const size = Math.max(Math.floor(minEdge * 0.7), 150);
+            return {
+                width: size,
+                height: size
+            };
+        },
+        aspectRatio: 1.0
+    };
+
+    function startCamera(camera) {
+        return qrScannerInstance.start(
+            camera,
+            config,
+            onQRScanSuccess,
+            function () {
+                // Ignore frames with no QR
+            }
+        ).then(function () {
+
+            qrScannerRunning = true;
+
+            document.getElementById("qrScanStatus").textContent =
+                "Point your camera at an event QR code...";
+
+        });
+    }
+
+    // Prefer rear camera
+    startCamera({
+        facingMode: {
+            exact: "environment"
+        }
+    }).catch(function () {
+
+        Html5Qrcode.getCameras().then(function (cameras) {
+
+            if (!cameras || !cameras.length) {
+
+                document.getElementById("qrScanStatus").textContent =
+                    "No camera found.";
+
+                return;
+            }
+
+            const rear =
+                cameras.find(function (c) {
+                    return /back|rear|environment/i.test(c.label || "");
+                }) || cameras[cameras.length - 1];
+
+            startCamera(rear.id).catch(function (err) {
+
+                document.getElementById("qrScanStatus").textContent =
+                    "Could not start camera: " + err;
+
+            });
+
+        }).catch(function () {
+
+            document.getElementById("qrScanStatus").textContent =
+                "Camera permission denied.";
+
+        });
+
+    });
+
 }
 
 function stopQRScanner() {
-  if (qrScannerInstance && qrScannerRunning) {
+
+    if (!qrScannerInstance)
+        return Promise.resolve();
+
+    const scanner = qrScannerInstance;
+
+    qrScannerInstance = null;
     qrScannerRunning = false;
-    qrScannerInstance.stop().then(() => qrScannerInstance.clear()).catch(() => {});
-  }
-  qrScannerInstance = null;
+
+    if (!scanner.isScanning)
+        return Promise.resolve();
+
+    return scanner.stop()
+        .then(function () {
+            return scanner.clear();
+        })
+        .catch(function () {
+            return Promise.resolve();
+        });
+
 }
 
 function closeQRScanner() {
-  document.getElementById("qrScannerModal").classList.remove("open");
-  stopQRScanner();
+
+    document.getElementById("qrScannerModal")
+        .classList.remove("open");
+
+    stopQRScanner();
+
 }
+
+
+  function handleQRFileUpload(fileInput) {
+
+    const file = fileInput.files && fileInput.files[0];
+
+    if (!file) return;
+
+    if (typeof Html5Qrcode === "undefined") {
+        toast("QR scanner library failed to load.", "error");
+        return;
+    }
+
+    document.getElementById("qrScanStatus").textContent =
+        "Reading QR code from image...";
+
+    const tempScanner = new Html5Qrcode("qrReader", {
+        verbose: false
+    });
+
+    tempScanner.scanFile(file, false)
+
+        .then(function(decodedText) {
+
+            stopQRScanner();
+
+            closeQRScanner();
+
+            resolveScannedEvent(decodedText);
+
+        })
+
+        .catch(function() {
+
+            document.getElementById("qrScanStatus").textContent =
+                "Could not detect a QR code in this image.";
+
+        })
+
+        .finally(function() {
+
+            fileInput.value = "";
+
+        });
+
+}
+
+  
 
 document.getElementById("scanQrBtn").addEventListener("click", openQRScanner);
 document.getElementById("scanQrBtnMobile").addEventListener("click", function(e) {
