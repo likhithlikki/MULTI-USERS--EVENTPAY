@@ -33,15 +33,25 @@
 
   document.addEventListener("DOMContentLoaded", init);
 
-  function init() {
+function init() {
+
     readIncomingData();
+
     renderSummary();
+
     bindMethodSwitch();
+
     bindRazorpay();
+
     bindUpi();
+
     bindResultButtons();
+
     loadGatewaySettings();
-  }
+
+    handleRazorpayLinkReturn();
+
+}
 
   // ---------------------------------------------------------
   // INCOMING DATA
@@ -81,6 +91,7 @@
     }
   }
 
+  
   // ---------------------------------------------------------
   // METHOD SWITCH
   // ---------------------------------------------------------
@@ -133,11 +144,266 @@
   // ---------------------------------------------------------
   // RAZORPAY FLOW
   // ---------------------------------------------------------
+
+
+function startRazorpayPayment() {
+
+    if (state.price <= 0) {
+        showToast("Nothing to pay for this plan.");
+        return;
+    }
+
+    setLoading(true, "Creating payment link...");
+
+    api("createSubscriptionPaymentLink", {
+        plan: state.plan,
+        amount: state.price,
+        organizerEmail: state.organizerEmail,
+        organizerName: state.organizerName,
+        organizerPhone: state.organizerPhone
+    }, "POST")
+    .then(function (res) {
+
+        setLoading(false);
+
+        if (!res || !res.success) {
+            showToast((res && res.message) || "Could not create payment link.");
+            return;
+        }
+
+        // Redirect to Razorpay Hosted Payment Page
+        window.location.href = res.short_url;
+
+    })
+    .catch(function (err) {
+
+        setLoading(false);
+        showToast("Error: " + err);
+
+    });
+
+}
+
+
+  function handleRazorpayLinkReturn() {
+
+    var qs = new URLSearchParams(window.location.search);
+
+    var linkId = qs.get("razorpay_payment_link_id");
+
+    if (!linkId) return;
+
+    window.history.replaceState({}, document.title, window.location.pathname);
+
+    setLoading(true, "Verifying payment...");
+
+    api("verifySubscriptionPaymentLink", {
+
+        razorpay_payment_link_id: linkId,
+
+        razorpay_payment_link_reference_id:
+            qs.get("razorpay_payment_link_reference_id") || "",
+
+        razorpay_payment_link_status:
+            qs.get("razorpay_payment_link_status") || "",
+
+        razorpay_payment_id:
+            qs.get("razorpay_payment_id") || "",
+
+        razorpay_signature:
+            qs.get("razorpay_signature") || ""
+
+    }, "POST")
+
+    .then(function (res) {
+
+        setLoading(false);
+
+        if (res && res.success) {
+
+            showResult(true, {
+
+                title: "Payment Successful",
+
+                subtitle: "Your subscription has been activated.",
+
+                details: {
+
+                    "Plan": state.plan,
+
+                    "Amount": fmtINR(state.price),
+
+                    "Payment ID":
+                        qs.get("razorpay_payment_id") || ""
+
+                }
+
+            });
+
+            stashResultForReturn({
+
+                paymentStatus: "success",
+
+                paymentId:
+                    qs.get("razorpay_payment_id") || "",
+
+                orderId: linkId,
+
+                transactionId:
+                    qs.get("razorpay_payment_id") || ""
+
+            });
+
+        } else {
+
+            showResult(false, {
+
+                title: "Payment Failed",
+
+                subtitle:
+                    (res && res.message) ||
+                    "Payment verification failed.",
+
+                details: {}
+
+            });
+
+        }
+
+    })
+
+    .catch(function (err) {
+
+        setLoading(false);
+
+        showResult(false, {
+
+            title: "Payment Failed",
+
+            subtitle: "Error: " + err,
+
+            details: {}
+
+        });
+
+    });
+
+}
+
+
+  
   function bindRazorpay() {
     document.getElementById("payNowBtn").addEventListener("click", startRazorpayPayment);
   }
 
- 
+
+
+  function handleRazorpayLinkReturn() {
+
+    var qs = new URLSearchParams(window.location.search);
+
+    var linkId = qs.get("razorpay_payment_link_id");
+
+    if (!linkId) return;
+
+    window.history.replaceState({}, document.title, window.location.pathname);
+
+    setLoading(true, "Verifying payment...");
+
+    api("verifySubscriptionPaymentLink", {
+
+        razorpay_payment_link_id: linkId,
+
+        razorpay_payment_link_reference_id:
+            qs.get("razorpay_payment_link_reference_id") || "",
+
+        razorpay_payment_link_status:
+            qs.get("razorpay_payment_link_status") || "",
+
+        razorpay_payment_id:
+            qs.get("razorpay_payment_id") || "",
+
+        razorpay_signature:
+            qs.get("razorpay_signature") || ""
+
+    }, "POST")
+
+    .then(function (res) {
+
+        setLoading(false);
+
+        if (res && res.success) {
+
+            showResult(true, {
+
+                title: "Payment Successful",
+
+                subtitle: "Your subscription has been activated.",
+
+                details: {
+
+                    "Plan": state.plan,
+
+                    "Amount": fmtINR(state.price),
+
+                    "Payment ID":
+                        qs.get("razorpay_payment_id") || ""
+
+                }
+
+            });
+
+            stashResultForReturn({
+
+                paymentStatus: "success",
+
+                paymentId:
+                    qs.get("razorpay_payment_id") || "",
+
+                orderId: linkId,
+
+                transactionId:
+                    qs.get("razorpay_payment_id") || ""
+
+            });
+
+        } else {
+
+            showResult(false, {
+
+                title: "Payment Failed",
+
+                subtitle:
+                    (res && res.message) ||
+                    "Payment verification failed.",
+
+                details: {}
+
+            });
+
+        }
+
+    })
+
+    .catch(function (err) {
+
+        setLoading(false);
+
+        showResult(false, {
+
+            title: "Payment Failed",
+
+            subtitle: "Error: " + err,
+
+            details: {}
+
+        });
+
+    });
+
+}
+
+  
 
   function verifyRazorpayPayment(response, orderId) {
     setLoading(true, "Verifying payment…");
