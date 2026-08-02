@@ -4,35 +4,43 @@
 // Authentication: single master admin, password-only, checked
 // server-side via masterLogin action.
 //
-// RESILIENCE UPDATE:
-// - Every network call has a hard timeout so a single stuck request
-//   can never hang the whole dashboard. Defaults: 45s for ordinary
-//   calls, 45s for login (cold starts are slow), 60s for the
-//   combined dashboard bootstrap (it does 9 sub-operations
-//   server-side in one execution). Raise MASTER_CONFIG.*_TIMEOUT_MS
-//   further if your Apps Script project is still timing out under
-//   these — there's no hard ceiling other than the browser's own
-//   fetch limits.
-// - loadAllData() uses Promise.allSettled instead of Promise.all —
-//   one section failing no longer blocks the others from rendering.
-// - If the combined bootstrap endpoint isn't deployed yet, the
-//   fallback path staggers the 9 individual calls 250ms apart
-//   instead of firing them all in the same instant — this is what
-//   was causing ALL of them to time out together (they were all
-//   competing for the same Apps Script execution slot at once).
-// - Each section renders its own error state inline ("Failed to
-//   load — <reason> [Retry]") instead of leaving a spinner forever
-//   or leaving the whole page blank.
-// - Events table now has both Activate and Deactivate actions —
-//   only the relevant one shows per row, based on current status.
+// THIS REVISION fixes/adds (see fix doc):
+// §11 — "refresh logs you out" bug. hasValidSession() used to
+//   require REMEMBER === "1" even though loginMasterAdmin() always
+//   wrote a valid TOKEN/EXPIRY to localStorage regardless of the
+//   checkbox — so an unchecked "Remember me" silently discarded a
+//   perfectly valid session on every refresh. Fixed by giving
+//   "Remember me" real meaning: unchecked -> sessionStorage (survives
+//   refresh/navigation, dies with the tab); checked -> localStorage
+//   (survives closing the browser too). hasValidSession() now checks
+//   both. The on-screen countdown is now derived from the real stored
+//   expiry instead of always resetting to 60:00. masterApi() also
+//   slides the locally stored expiry forward on every successful
+//   authenticated call, mirroring the backend's own sliding
+//   expiration in requireMasterAuth_().
+// §2 — sidebar "Backend not connected" dot is now real: green after
+//   a successful load, red (with a toast) if both the bootstrap and
+//   the individual-loader fallback fail.
+// §5 — Applications now carries a `type` field per row
+//   ("eventApplication" | "subscriptionPayment") so Approve/Reject
+//   hit the right sheet on the backend (EventApplications vs.
+//   SubscriptionPayments), matching the already-updated backend.
+// §9 — Master Database view now lists real backups (from the
+//   `listMasterBackups` action) with a Restore button per row that
+//   passes the correct backupFileId, instead of a single button that
+//   always sent an empty payload.
+//
+// (Everything from the prior revision — staggered fallback loader,
+// per-section inline error cards, combined bootstrap-first strategy —
+// is unchanged.)
 // ============================================================
 
 const MASTER_CONFIG = {
   SCRIPT_URL: APP_CONFIG.SCRIPT_URL,
   SESSION_MINUTES: 60,
-  REQUEST_TIMEOUT_MS: 45000,      // hard cap per ordinary network call (was 20s)
-  LOGIN_TIMEOUT_MS: 45000,        // login can hit a cold start — give it the same room
-  BOOTSTRAP_TIMEOUT_MS: 60000,    // the combined dashboard call does 9 sub-operations server-side
+  REQUEST_TIMEOUT_MS: 45000,
+  LOGIN_TIMEOUT_MS: 45000,
+  BOOTSTRAP_TIMEOUT_MS: 60000,
   LS: {
     TOKEN: "ep_master_token",
     EXPIRY: "ep_master_expiry",
@@ -58,13 +66,85 @@ const state = {
   auditLog: [],
   plans: [],
   globalSettings: [],
+  backups: [],
   sessionSecondsLeft: MASTER_CONFIG.SESSION_MINUTES * 60,
   sessionTimerHandle: null,
-  bootstrapSupported: true, // flips to false if the combined action isn't deployed
+  bootstrapSupported: true,
 };
 
 // ============================================================
-// GENERIC API HELPER (now with timeout + never-throws contract)
+// SESSION STORAGE HELPERS (§11)
+// ------------------------------------------------------------
+// "Remember me" now genuinely controls WHERE the token lives:
+//   - unchecked -> sessionStorage: gone when the tab/browser closes,
+//     but a plain refresh or in-tab navigation keeps it.
+//   - checked   -> localStorage: survives closing and reopening the
+//     browser entirely.
+// Every read goes through getStoredSession()/getActiveStore() so
+// there is exactly one place that decides "where is the token."
+// ============================================================
+function getActiveStore() {
+  // Prefer whichever store actually holds a live, non-expired token.
+  // sessionStorage is checked first since it's the more common case
+  // (unchecked "Remember me").
+  for (const store of [sessionStorage, localStorage]) {
+    const token = store.getItem(MASTER_CONFIG.LS.TOKEN);
+    const expiry = Number(store.getItem(MASTER_CONFIG.LS.EXPIRY) || 0);
+    if (token && expiry > Date.now()) return store;
+  }
+  return null;
+}
+
+function getStoredToken() {
+  const store = getActiveStore();
+  return store ? store.getItem(MASTER_CONFIG.LS.TOKEN) : null;
+}
+
+function getStoredExpiry() {
+  const store = getActiveStore();
+  return store ? Number(store.getItem(MASTER_CONFIG.LS.EXPIRY) || 0) : 0;
+}
+
+function hasValidSession() {
+  return !!getActiveStore();
+}
+
+function persistSession(token, expiry, remember) {
+  const store = remember ? localStorage : sessionStorage;
+  const other = remember ? sessionStorage : localStorage;
+  store.setItem(MASTER_CONFIG.LS.TOKEN, token);
+  store.setItem(MASTER_CONFIG.LS.EXPIRY, String(expiry));
+  // Keep REMEMBER as a simple UI-preference flag (used to pre-check
+  // the checkbox next time), not as a gate on session validity.
+  localStorage.setItem(MASTER_CONFIG.LS.REMEMBER, remember ? "1" : "0");
+  // Make sure a stale token isn't left behind in the OTHER store from
+  // a previous login with a different "Remember me" choice.
+  other.removeItem(MASTER_CONFIG.LS.TOKEN);
+  other.removeItem(MASTER_CONFIG.LS.EXPIRY);
+}
+
+function clearSession() {
+  [localStorage, sessionStorage].forEach((store) => {
+    store.removeItem(MASTER_CONFIG.LS.TOKEN);
+    store.removeItem(MASTER_CONFIG.LS.EXPIRY);
+  });
+  localStorage.removeItem(MASTER_CONFIG.LS.REMEMBER);
+}
+
+// Slide the locally stored expiry forward, mirroring the backend's
+// own sliding expiration (requireMasterAuth_ extends the CacheService
+// TTL on every authenticated call). Without this, the frontend would
+// force a re-login at the ORIGINAL login time's +60min mark even
+// though the backend session is still very much alive.
+function extendStoredExpiry() {
+  const store = getActiveStore();
+  if (!store) return;
+  const newExpiry = Date.now() + MASTER_CONFIG.SESSION_MINUTES * 60 * 1000;
+  store.setItem(MASTER_CONFIG.LS.EXPIRY, String(newExpiry));
+}
+
+// ============================================================
+// GENERIC API HELPER
 // ============================================================
 async function masterApi(action, params = {}, method = "GET", timeoutMs = MASTER_CONFIG.REQUEST_TIMEOUT_MS) {
   if (!MASTER_CONFIG.SCRIPT_URL) {
@@ -72,38 +152,54 @@ async function masterApi(action, params = {}, method = "GET", timeoutMs = MASTER
     return { success: false, error: "Backend not connected yet." };
   }
 
-  const token = action === "masterLogin" ? null : localStorage.getItem(MASTER_CONFIG.LS.TOKEN);
+  const token = action === "masterLogin" ? null : getStoredToken();
   const fullParams = token ? { ...params, token } : params;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
+  let result;
   try {
     if (method === "GET") {
       const url = new URL(MASTER_CONFIG.SCRIPT_URL);
       url.searchParams.set("action", action);
       Object.entries(fullParams).forEach(([k, v]) => url.searchParams.set(k, String(v)));
       const res = await fetch(url.toString(), { signal: controller.signal });
-      if (!res.ok) return { success: false, error: `Server returned ${res.status}` };
-      const text = await res.text();
-      try { return JSON.parse(text); }
-      catch (e) { return { success: false, error: "Invalid response from server", raw: text }; }
+      if (!res.ok) { result = { success: false, error: `Server returned ${res.status}` }; }
+      else {
+        const text = await res.text();
+        try { result = JSON.parse(text); }
+        catch (e) { result = { success: false, error: "Invalid response from server", raw: text }; }
+      }
     } else {
       const body = new URLSearchParams({ action, ...fullParams });
       const res = await fetch(MASTER_CONFIG.SCRIPT_URL, { method: "POST", body, signal: controller.signal });
-      if (!res.ok) return { success: false, error: `Server returned ${res.status}` };
-      const text = await res.text();
-      try { return JSON.parse(text); }
-      catch (e) { return { success: false, error: "Invalid response from server", raw: text }; }
+      if (!res.ok) { result = { success: false, error: `Server returned ${res.status}` }; }
+      else {
+        const text = await res.text();
+        try { result = JSON.parse(text); }
+        catch (e) { result = { success: false, error: "Invalid response from server", raw: text }; }
+      }
     }
   } catch (err) {
     if (err.name === "AbortError") {
-      return { success: false, error: `Request timed out after ${Math.round(timeoutMs / 1000)}s`, timeout: true };
+      result = { success: false, error: `Request timed out after ${Math.round(timeoutMs / 1000)}s`, timeout: true };
+    } else {
+      result = { success: false, error: err.message || "Network error", networkError: true };
     }
-    return { success: false, error: err.message || "Network error", networkError: true };
   } finally {
     clearTimeout(timer);
   }
+
+  // Sliding expiration: any successful, token-bearing call extends the
+  // locally stored expiry too, so the frontend's idea of "still logged
+  // in" tracks the backend's, instead of expiring 60 minutes after the
+  // original login regardless of activity.
+  if (token && result && result.success !== false) {
+    extendStoredExpiry();
+  }
+
+  return result;
 }
 
 // ============================================================
@@ -131,11 +227,6 @@ function escapeHtml(str) {
 
 // ============================================================
 // INLINE SECTION ERROR STATE HELPERS
-// ------------------------------------------------------------
-// renderSectionError(containerId, message, retryFn) replaces a
-// container's contents with a small "failed to load" card with a
-// Retry button, instead of leaving a spinner/skeleton forever or a
-// blank panel. Nothing else on the page is affected.
 // ============================================================
 function renderSectionError(containerId, message, retryFn) {
   const el = document.getElementById(containerId);
@@ -160,9 +251,6 @@ function renderSectionError(containerId, message, retryFn) {
   }
 }
 
-// Small inline badge for spots that aren't full "sections" (e.g. a
-// single stat block or a single info field) so a failure there
-// doesn't blank the whole card either.
 function renderInlineError(el, message) {
   if (!el) return;
   el.innerHTML = `<span style="color:#f87171;font-size:12px;">⚠️ ${escapeHtml(message || "Failed")}</span>`;
@@ -223,6 +311,23 @@ function toggleTheme() {
 }
 
 // ============================================================
+// BACKEND STATUS DOT (§2)
+// ============================================================
+function setBackendStatus(status, detail) {
+  // status: "online" | "offline" | "pending"
+  const dot = document.getElementById("sidebarStatusDot");
+  const label = document.getElementById("sidebarStatusLabel");
+  if (!dot || !label) return;
+  dot.classList.remove("online", "offline", "pending");
+  dot.classList.add(status);
+  const text = { online: "Connected", offline: "Connection issue", pending: "Connecting…" }[status] || "Unknown";
+  label.textContent = text;
+  if (status === "offline" && detail) {
+    toast("Connection issue: " + detail, "error");
+  }
+}
+
+// ============================================================
 // LOGIN FLOW
 // ============================================================
 function initLogin() {
@@ -230,6 +335,12 @@ function initLogin() {
   const pwInput = document.getElementById("masterPassword");
   const toggleBtn = document.getElementById("togglePasswordBtn");
   const errorEl = document.getElementById("loginError");
+
+  // Pre-check "Remember me" based on the user's last choice — purely
+  // a UI convenience now, it no longer gates whether a session
+  // survives a refresh (both paths do; see hasValidSession()).
+  const rememberBox = document.getElementById("rememberMe");
+  if (rememberBox) rememberBox.checked = localStorage.getItem(MASTER_CONFIG.LS.REMEMBER) === "1";
 
   toggleBtn.addEventListener("click", () => {
     const showing = pwInput.type === "text";
@@ -283,15 +394,8 @@ async function loginMasterAdmin(password, remember) {
   }
 
   const expiry = Date.now() + (res.expiresInSeconds || MASTER_CONFIG.SESSION_MINUTES * 60) * 1000;
-  localStorage.setItem(MASTER_CONFIG.LS.TOKEN, res.token);
-  localStorage.setItem(MASTER_CONFIG.LS.EXPIRY, String(expiry));
-  localStorage.setItem(MASTER_CONFIG.LS.REMEMBER, remember ? "1" : "0");
+  persistSession(res.token, expiry, remember);
   return { success: true };
-}
-
-function hasValidSession() {
-  const expiry = Number(localStorage.getItem(MASTER_CONFIG.LS.EXPIRY) || 0);
-  return localStorage.getItem(MASTER_CONFIG.LS.REMEMBER) === "1" && expiry > Date.now();
 }
 
 function enterDashboard() {
@@ -299,13 +403,12 @@ function enterDashboard() {
   document.getElementById("dashboardShell").classList.remove("hidden");
   if (window.lucide) lucide.createIcons();
   startSessionTimer();
+  setBackendStatus("pending");
   loadAllData();
 }
 
 function logoutMasterAdmin() {
-  localStorage.removeItem(MASTER_CONFIG.LS.TOKEN);
-  localStorage.removeItem(MASTER_CONFIG.LS.EXPIRY);
-  localStorage.removeItem(MASTER_CONFIG.LS.REMEMBER);
+  clearSession();
   stopSessionTimer();
   document.getElementById("dashboardShell").classList.add("hidden");
   document.getElementById("loginScreen").classList.remove("hidden");
@@ -314,14 +417,27 @@ function logoutMasterAdmin() {
 }
 
 // ============================================================
-// SESSION TIMER
+// SESSION TIMER (§11 — synced to the REAL stored expiry, not a
+// hardcoded 60:00 reset on every call)
 // ============================================================
 function startSessionTimer() {
-  state.sessionSecondsLeft = MASTER_CONFIG.SESSION_MINUTES * 60;
+  const expiry = getStoredExpiry();
+  state.sessionSecondsLeft = expiry ? Math.max(0, Math.floor((expiry - Date.now()) / 1000)) : MASTER_CONFIG.SESSION_MINUTES * 60;
   updateSessionTimerText();
   stopSessionTimer();
   state.sessionTimerHandle = setInterval(() => {
-    state.sessionSecondsLeft--;
+    // Re-derive from storage each tick instead of just counting down a
+    // local variable — this way an extendStoredExpiry() call from
+    // masterApi() (sliding expiration) is reflected immediately rather
+    // than the timer ticking down to zero on its own stale schedule.
+    const currentExpiry = getStoredExpiry();
+    if (!currentExpiry) {
+      stopSessionTimer();
+      toast("Session expired — please log in again.", "warning");
+      logoutMasterAdmin();
+      return;
+    }
+    state.sessionSecondsLeft = Math.max(0, Math.floor((currentExpiry - Date.now()) / 1000));
     updateSessionTimerText();
     if (state.sessionSecondsLeft <= 0) {
       stopSessionTimer();
@@ -367,16 +483,6 @@ function switchView(viewName) {
 
 // ============================================================
 // DATA LOADING
-// ------------------------------------------------------------
-// Strategy:
-// 1. Try ONE combined call (getMasterDashboardBootstrap) first. If
-//    the backend supports it, this is a single round-trip and each
-//    section's data/errors come back together — render everything,
-//    with per-section error cards for whatever failed server-side.
-// 2. If the combined action isn't recognized (older backend, or the
-//    call itself fails/times out), fall back to firing the original
-//    per-section calls via Promise.allSettled — so one stuck/broken
-//    call NEVER blocks the rest of the dashboard from rendering.
 // ============================================================
 async function loadAllData() {
   if (state.bootstrapSupported) {
@@ -385,23 +491,32 @@ async function loadAllData() {
 
     if (!looksUnsupported && res) {
       applyBootstrapResult(res);
+      // Consider the backend "online" if at least the core sections
+      // (events + stats) came back — a couple of secondary sections
+      // failing shouldn't flip the whole dashboard red.
+      const coreOk = !!(res.events && res.events.events) && !!res.stats;
+      setBackendStatus(coreOk ? "online" : "offline",
+        coreOk ? null : "Some dashboard sections failed to load.");
       return;
     }
-    // Combined endpoint not available — remember that and fall back.
+    // Combined endpoint not available this session — retry it again
+    // on the NEXT manual refresh instead of being locked into the
+    // slower per-call fallback forever (see fix doc §3).
     state.bootstrapSupported = false;
   }
 
-  await loadAllDataIndividually();
+  const ok = await loadAllDataIndividually();
+  setBackendStatus(ok ? "online" : "offline", ok ? null : "Backend did not respond.");
+  // Give the combined endpoint another chance next time.
+  state.bootstrapSupported = true;
 }
 
 function applyBootstrapResult(res) {
   const errors = res.errors || {};
 
-  // Stats
   if (res.stats) renderStatCards(res.stats);
   else renderSectionError("statGrid", errors.stats || "No stats returned", loadStats);
 
-  // Events
   if (res.events && res.events.events) {
     state.events = res.events.events || [];
     applyEventsFilters();
@@ -409,7 +524,6 @@ function applyBootstrapResult(res) {
     renderSectionError("eventsTableBody", errors.events || "No events returned", loadEvents);
   }
 
-  // Global settings
   if (res.globalSettings && res.globalSettings.settings) {
     state.globalSettings = res.globalSettings.settings;
     renderGlobalSettings();
@@ -417,7 +531,6 @@ function applyBootstrapResult(res) {
     renderSectionError("globalSettingsGrid", errors.globalSettings || "No settings returned", loadGlobalSettings);
   }
 
-  // Plans
   if (res.plans && res.plans.plans && res.plans.plans.length) {
     state.plans = res.plans.plans;
     renderPlans();
@@ -428,7 +541,6 @@ function applyBootstrapResult(res) {
     renderPlans();
   }
 
-  // Applications
   if (res.applications && res.applications.applications) {
     state.applications = res.applications.applications || [];
     document.getElementById("applicationsBadge").textContent =
@@ -439,7 +551,6 @@ function applyBootstrapResult(res) {
     renderSectionError("applicationsGrid", errors.applications || "No applications returned", loadApplications);
   }
 
-  // Audit log
   if (res.auditLog && res.auditLog.log) {
     state.auditLog = res.auditLog.log || [];
     renderAuditTrail();
@@ -447,21 +558,21 @@ function applyBootstrapResult(res) {
     renderSectionError("auditTimeline", errors.auditLog || "No audit log returned", loadAuditTrail);
   }
 
-  // Master DB info
   if (res.dbInfo && res.dbInfo.info) {
     renderMasterDbInfo(res.dbInfo.info);
   } else {
     renderInlineError(document.getElementById("masterDbId"), errors.dbInfo || "Failed to load");
   }
+  // Backup list isn't part of the bootstrap payload — load it
+  // separately (cheap, single-sheet read).
+  loadBackupsList();
 
-  // Profile
   if (res.profile && res.profile.profile) {
     applyProfileData(res.profile.profile);
   } else if (errors.profile) {
     console.warn("Profile load failed:", errors.profile);
   }
 
-  // Email settings
   if (res.emailSettings && res.emailSettings.settings) {
     applyEmailSettings(res.emailSettings.settings);
   } else if (errors.emailSettings) {
@@ -472,21 +583,10 @@ function applyBootstrapResult(res) {
 function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 async function loadAllDataIndividually() {
-  // Promise.allSettled: every section attempts to load independently.
-  // A rejection/failure in one never prevents the others from
-  // resolving and rendering. Each loader below is itself
-  // try/catch-safe and renders its own error state on failure.
-  //
-  // STAGGERED START: firing all 9 calls in the exact same instant
-  // means every one of them contends for the same Apps Script
-  // execution slot at once — which is what made ALL of them time
-  // out together, not just one. Spacing the start of each call out
-  // by a small delay lets earlier ones clear the queue before later
-  // ones arrive, without meaningfully slowing down the total load.
   const loaders = [
     loadStats, loadEvents, loadGlobalSettings, loadPlans,
     loadApplications, loadAuditTrail, loadMasterDbInfo,
-    loadProfileData, loadEmailSettings,
+    loadProfileData, loadEmailSettings, loadBackupsList,
   ];
   const STAGGER_MS = 250;
 
@@ -494,11 +594,16 @@ async function loadAllDataIndividually() {
     loaders.map((fn, i) => wait(i * STAGGER_MS).then(fn))
   );
 
+  let failures = 0;
   results.forEach((r, i) => {
     if (r.status === "rejected") {
+      failures++;
       console.error(`[loadAllData] section #${i} threw unexpectedly:`, r.reason);
     }
   });
+  // "Online" if at least most sections loaded — a single section
+  // failing shouldn't flip the whole indicator red.
+  return failures < loaders.length;
 }
 
 // ---------------- Dashboard stats ----------------
@@ -1102,7 +1207,7 @@ function applyEmailSettings(s) {
 }
 
 // ============================================================
-// APPLICATIONS
+// APPLICATIONS (§5 — merged EventApplications + SubscriptionPayments)
 // ============================================================
 async function loadApplications() {
   const badge = document.getElementById("applicationsBadge");
@@ -1152,33 +1257,34 @@ function renderApplications() {
   grid.innerHTML = rows.map((a) => `
     <div class="application-card glass">
       <div class="application-card-head">
-        <span class="application-card-name">${escapeHtml(a.eventName || "Untitled event")}</span>
+        <span class="application-card-name">${escapeHtml(a.eventName || "Untitled")}</span>
         <span class="badge ${a.status === "approved" ? "badge-active" : a.status === "rejected" ? "badge-expired" : "badge-pending"}">${escapeHtml(a.status || "pending")}</span>
       </div>
       <div class="application-card-meta">
         <span>${escapeHtml(a.name || "")}</span>
         <span>${escapeHtml(a.email || "")}</span>
         <span>${fmtDate(a.submittedDate)}</span>
+        <span class="app-type-tag">${a.type === "subscriptionPayment" ? "Subscription payment" : "Event application"}</span>
       </div>
       <div class="application-card-actions">
-        <button class="btn btn-primary btn-sm" onclick="approveApplication('${escapeHtml(a.id)}')"><i data-lucide="check"></i>Approve</button>
-        <button class="btn btn-danger btn-sm" onclick="rejectApplication('${escapeHtml(a.id)}')"><i data-lucide="x"></i>Reject</button>
+        <button class="btn btn-primary btn-sm" onclick="approveApplication('${escapeHtml(a.id)}','${escapeHtml(a.type || "eventApplication")}')"><i data-lucide="check"></i>Approve</button>
+        <button class="btn btn-danger btn-sm" onclick="rejectApplication('${escapeHtml(a.id)}','${escapeHtml(a.type || "eventApplication")}')"><i data-lucide="x"></i>Reject</button>
         <button class="btn btn-ghost btn-sm" onclick="viewApplication('${escapeHtml(a.id)}')"><i data-lucide="eye"></i>View</button>
       </div>
     </div>`).join("");
   if (window.lucide) lucide.createIcons();
 }
 
-async function approveApplication(id) {
-  const res = await masterApi("approveApplication", { id }, "POST");
-  toast(res.success ? "Application approved" : (res.error || "Failed"), res.success ? "success" : "error");
+async function approveApplication(id, type) {
+  const res = await masterApi("approveApplication", { id, type }, "POST");
+  toast(res.success ? "Approved" : (res.error || "Failed"), res.success ? "success" : "error");
   loadApplications();
 }
-async function rejectApplication(id) {
+async function rejectApplication(id, type) {
   const ok = await confirmDialog({ title: "Reject this application?", message: "The organizer will be notified.", confirmLabel: "Reject" });
   if (!ok) return;
-  const res = await masterApi("rejectApplication", { id }, "POST");
-  toast(res.success ? "Application rejected" : (res.error || "Failed"), res.success ? "success" : "error");
+  const res = await masterApi("rejectApplication", { id, type }, "POST");
+  toast(res.success ? "Rejected" : (res.error || "Failed"), res.success ? "success" : "error");
   loadApplications();
 }
 function viewApplication(id) {
@@ -1239,7 +1345,7 @@ function renderAuditTrail() {
 }
 
 // ============================================================
-// MASTER DATABASE
+// MASTER DATABASE (§9 — real backup list + fixed Restore)
 // ============================================================
 async function loadMasterDbInfo() {
   const idEl = document.getElementById("masterDbId");
@@ -1267,25 +1373,90 @@ function renderMasterDbInfo(info) {
   document.getElementById("copyMasterDbIdBtn").onclick = () => copyToClipboard(info.spreadsheetId, "Master Spreadsheet ID copied");
 }
 
+async function loadBackupsList() {
+  const container = document.getElementById("backupsList");
+  if (!container) return;
+  container.innerHTML = `<div style="padding:14px;text-align:center;color:var(--text-faint,#94a3b8);">Loading backups…</div>`;
+  try {
+    const res = await masterApi("listMasterBackups");
+    if (!res.success && !res.backups) {
+      renderSectionError("backupsList", res.error || "Failed to load backups", loadBackupsList);
+      return;
+    }
+    state.backups = res.backups || [];
+    renderBackupsList();
+  } catch (e) {
+    renderSectionError("backupsList", e.message || "Unexpected error", loadBackupsList);
+  }
+}
+
+function renderBackupsList() {
+  const container = document.getElementById("backupsList");
+  if (!container) return;
+  if (!state.backups.length) {
+    container.innerHTML = `<div style="padding:14px;text-align:center;color:var(--text-faint,#94a3b8);">No backups yet — create one below.</div>`;
+    return;
+  }
+  container.innerHTML = state.backups.map((b) => `
+    <div class="backup-row">
+      <div class="backup-row-info">
+        <div class="backup-row-name">${escapeHtml(b.fileName || "Backup")}</div>
+        <div class="backup-row-meta">${escapeHtml(b.timestamp || "")}</div>
+      </div>
+      <div class="backup-row-actions">
+        <button class="btn btn-ghost btn-sm" data-open="${escapeHtml(b.fileId)}"><i data-lucide="external-link"></i>Open</button>
+        <button class="btn btn-danger btn-sm" data-restore="${escapeHtml(b.fileId)}"><i data-lucide="rotate-ccw"></i>Restore</button>
+      </div>
+    </div>`).join("");
+
+  container.querySelectorAll("[data-open]").forEach((btn) => {
+    btn.addEventListener("click", () => openUrl(sheetUrlFromId(btn.dataset.open)));
+  });
+  container.querySelectorAll("[data-restore]").forEach((btn) => {
+    btn.addEventListener("click", () => restoreSpecificBackup(btn.dataset.restore));
+  });
+  if (window.lucide) lucide.createIcons();
+}
+
+async function restoreSpecificBackup(backupFileId) {
+  const ok = await confirmDialog({
+    title: "Restore this backup?",
+    message: "This overwrites the live Master Database with this backup's contents.",
+    confirmLabel: "Restore",
+  });
+  if (!ok) return;
+  const res = await masterApi("restoreMasterBackup", { backupFileId }, "POST");
+  toast(res.success ? "Master Database restored" : (res.error || "Restore failed"), res.success ? "success" : "error");
+}
+
 function initMasterDatabaseControls() {
   document.getElementById("createBackupBtn").addEventListener("click", async () => {
     const res = await masterApi("createMasterBackup", {}, "POST");
     toast(res.success ? "Backup created" : (res.error || "Backup failed"), res.success ? "success" : "error");
     loadMasterDbInfo();
+    loadBackupsList();
   });
 
   document.getElementById("downloadMasterBackupBtn").addEventListener("click", async () => {
     const res = await masterApi("downloadMasterBackup");
     if (res.success && res.url) window.open(res.url, "_blank");
     else toast(res.error || "No backup found", "error");
+    loadBackupsList();
   });
 
-  document.getElementById("restoreBackupBtn").addEventListener("click", async () => {
-    const ok = await confirmDialog({ title: "Restore Master Database?", message: "This overwrites current data.", confirmLabel: "Restore" });
-    if (!ok) return;
-    const res = await masterApi("restoreMasterBackup", {}, "POST");
-    toast(res.success ? "Master Database restored" : (res.error || "Restore failed"), res.success ? "success" : "error");
-  });
+  // The old single "Restore" button had no way to specify WHICH
+  // backup to restore, so it always sent an empty payload and the
+  // backend always rejected it with "Missing backupFileId." The
+  // button now just scrolls to / focuses the backup list instead of
+  // trying to restore blindly.
+  const legacyRestoreBtn = document.getElementById("restoreBackupBtn");
+  if (legacyRestoreBtn) {
+    legacyRestoreBtn.textContent = "";
+    legacyRestoreBtn.innerHTML = `<i data-lucide="list"></i> View backups to restore`;
+    legacyRestoreBtn.addEventListener("click", () => {
+      document.getElementById("backupsList")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }
 }
 
 // ============================================================
@@ -1331,11 +1502,21 @@ function initHeader() {
   document.getElementById("themeToggleBtn").addEventListener("click", toggleTheme);
   document.getElementById("logoutBtn").addEventListener("click", logoutMasterAdmin);
   document.getElementById("refreshBtn").addEventListener("click", () => {
+    setBackendStatus("pending");
     toast("Refreshing...", "info", 1200);
     loadAllData();
   });
   document.getElementById("notifBtn").addEventListener("click", () => {
-    toast("No new notifications", "info");
+    // Lightweight version: surface the most recent audit entries plus
+    // the pending-applications count as a toast digest. A full
+    // dropdown panel with read/unread state is a bigger feature — see
+    // fix doc §10 — this covers "show me something real" for now.
+    const pending = state.applications.filter((a) => a.status === "pending").length;
+    const latest = state.auditLog[0];
+    const parts = [];
+    if (pending > 0) parts.push(`${pending} pending application${pending === 1 ? "" : "s"}`);
+    if (latest) parts.push(`Latest: ${latest.action} (${fmtDate(latest.date)})`);
+    toast(parts.length ? parts.join(" · ") : "No new notifications", "info", 5000);
   });
 }
 
