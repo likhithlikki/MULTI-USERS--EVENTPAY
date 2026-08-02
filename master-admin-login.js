@@ -3,11 +3,26 @@
 // MASTER ADMIN dashboard. Manages ONLY the Master Database.
 // Authentication: single master admin, password-only, checked
 // server-side via masterLogin action.
+//
+// RESILIENCE UPDATE:
+// - Every network call now has a hard timeout (default 20s) so a
+//   single stuck request can never hang the whole dashboard.
+// - loadAllData() uses Promise.allSettled instead of Promise.all —
+//   one section failing no longer blocks the others from rendering.
+// - Each section renders its own error state inline ("Failed to
+//   load — <reason> [Retry]") instead of leaving a spinner forever
+//   or leaving the whole page blank.
+// - Optional single-request bootstrap (getMasterDashboardBootstrap)
+//   is tried first to avoid firing 9 parallel round-trips against
+//   the same Apps Script deployment; if that action isn't deployed
+//   yet on the backend, it automatically falls back to the original
+//   per-section calls.
 // ============================================================
 
 const MASTER_CONFIG = {
   SCRIPT_URL: APP_CONFIG.SCRIPT_URL,
   SESSION_MINUTES: 60,
+  REQUEST_TIMEOUT_MS: 20000,     // hard cap per network call
   LS: {
     TOKEN: "ep_master_token",
     EXPIRY: "ep_master_expiry",
@@ -35,12 +50,13 @@ const state = {
   globalSettings: [],
   sessionSecondsLeft: MASTER_CONFIG.SESSION_MINUTES * 60,
   sessionTimerHandle: null,
+  bootstrapSupported: true, // flips to false if the combined action isn't deployed
 };
 
 // ============================================================
-// GENERIC API HELPER
+// GENERIC API HELPER (now with timeout + never-throws contract)
 // ============================================================
-async function masterApi(action, params = {}, method = "GET") {
+async function masterApi(action, params = {}, method = "GET", timeoutMs = MASTER_CONFIG.REQUEST_TIMEOUT_MS) {
   if (!MASTER_CONFIG.SCRIPT_URL) {
     console.warn(`[masterApi] SCRIPT_URL not configured — action "${action}" skipped.`);
     return { success: false, error: "Backend not connected yet." };
@@ -49,21 +65,34 @@ async function masterApi(action, params = {}, method = "GET") {
   const token = action === "masterLogin" ? null : localStorage.getItem(MASTER_CONFIG.LS.TOKEN);
   const fullParams = token ? { ...params, token } : params;
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
     if (method === "GET") {
       const url = new URL(MASTER_CONFIG.SCRIPT_URL);
       url.searchParams.set("action", action);
       Object.entries(fullParams).forEach(([k, v]) => url.searchParams.set(k, String(v)));
-      const res = await fetch(url.toString());
-      return await res.json();
+      const res = await fetch(url.toString(), { signal: controller.signal });
+      if (!res.ok) return { success: false, error: `Server returned ${res.status}` };
+      const text = await res.text();
+      try { return JSON.parse(text); }
+      catch (e) { return { success: false, error: "Invalid response from server", raw: text }; }
     } else {
       const body = new URLSearchParams({ action, ...fullParams });
-      const res = await fetch(MASTER_CONFIG.SCRIPT_URL, { method: "POST", body });
+      const res = await fetch(MASTER_CONFIG.SCRIPT_URL, { method: "POST", body, signal: controller.signal });
+      if (!res.ok) return { success: false, error: `Server returned ${res.status}` };
       const text = await res.text();
-      try { return JSON.parse(text); } catch (e) { return { success: false, error: "Invalid response from server", raw: text }; }
+      try { return JSON.parse(text); }
+      catch (e) { return { success: false, error: "Invalid response from server", raw: text }; }
     }
   } catch (err) {
-    return { success: false, error: err.message };
+    if (err.name === "AbortError") {
+      return { success: false, error: `Request timed out after ${Math.round(timeoutMs / 1000)}s`, timeout: true };
+    }
+    return { success: false, error: err.message || "Network error", networkError: true };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -88,6 +117,45 @@ function escapeHtml(str) {
   const d = document.createElement("div");
   d.textContent = str ?? "";
   return d.innerHTML;
+}
+
+// ============================================================
+// INLINE SECTION ERROR STATE HELPERS
+// ------------------------------------------------------------
+// renderSectionError(containerId, message, retryFn) replaces a
+// container's contents with a small "failed to load" card with a
+// Retry button, instead of leaving a spinner/skeleton forever or a
+// blank panel. Nothing else on the page is affected.
+// ============================================================
+function renderSectionError(containerId, message, retryFn) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const retryId = `retry-${containerId}-${Date.now()}`;
+  el.innerHTML = `
+    <div class="section-error glass" style="padding:20px;text-align:center;color:var(--text-faint,#94a3b8);grid-column:1/-1">
+      <div style="font-size:14px;margin-bottom:10px;">
+        ⚠️ Failed to load — ${escapeHtml(message || "Unknown error")}
+      </div>
+      <button class="btn btn-secondary btn-sm" id="${retryId}">
+        <i data-lucide="refresh-cw"></i> Retry
+      </button>
+    </div>`;
+  if (window.lucide) lucide.createIcons();
+  const btn = document.getElementById(retryId);
+  if (btn && typeof retryFn === "function") {
+    btn.addEventListener("click", () => {
+      el.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-faint,#94a3b8);grid-column:1/-1">Retrying…</div>`;
+      retryFn();
+    });
+  }
+}
+
+// Small inline badge for spots that aren't full "sections" (e.g. a
+// single stat block or a single info field) so a failure there
+// doesn't blank the whole card either.
+function renderInlineError(el, message) {
+  if (!el) return;
+  el.innerHTML = `<span style="color:#f87171;font-size:12px;">⚠️ ${escapeHtml(message || "Failed")}</span>`;
 }
 
 // ============================================================
@@ -289,13 +357,124 @@ function switchView(viewName) {
 
 // ============================================================
 // DATA LOADING
+// ------------------------------------------------------------
+// Strategy:
+// 1. Try ONE combined call (getMasterDashboardBootstrap) first. If
+//    the backend supports it, this is a single round-trip and each
+//    section's data/errors come back together — render everything,
+//    with per-section error cards for whatever failed server-side.
+// 2. If the combined action isn't recognized (older backend, or the
+//    call itself fails/times out), fall back to firing the original
+//    per-section calls via Promise.allSettled — so one stuck/broken
+//    call NEVER blocks the rest of the dashboard from rendering.
 // ============================================================
 async function loadAllData() {
-  await Promise.all([
+  if (state.bootstrapSupported) {
+    const res = await masterApi("getMasterDashboardBootstrap");
+    const looksUnsupported = !res || (res.success === false && /unknown action/i.test(res.error || ""));
+
+    if (!looksUnsupported && res) {
+      applyBootstrapResult(res);
+      return;
+    }
+    // Combined endpoint not available — remember that and fall back.
+    state.bootstrapSupported = false;
+  }
+
+  await loadAllDataIndividually();
+}
+
+function applyBootstrapResult(res) {
+  const errors = res.errors || {};
+
+  // Stats
+  if (res.stats) renderStatCards(res.stats);
+  else renderSectionError("statGrid", errors.stats || "No stats returned", loadStats);
+
+  // Events
+  if (res.events && res.events.events) {
+    state.events = res.events.events || [];
+    applyEventsFilters();
+  } else {
+    renderSectionError("eventsTableBody", errors.events || "No events returned", loadEvents);
+  }
+
+  // Global settings
+  if (res.globalSettings && res.globalSettings.settings) {
+    state.globalSettings = res.globalSettings.settings;
+    renderGlobalSettings();
+  } else {
+    renderSectionError("globalSettingsGrid", errors.globalSettings || "No settings returned", loadGlobalSettings);
+  }
+
+  // Plans
+  if (res.plans && res.plans.plans && res.plans.plans.length) {
+    state.plans = res.plans.plans;
+    renderPlans();
+  } else if (errors.plans) {
+    renderSectionError("plansGrid", errors.plans, loadPlans);
+  } else {
+    state.plans = DEFAULT_PLANS;
+    renderPlans();
+  }
+
+  // Applications
+  if (res.applications && res.applications.applications) {
+    state.applications = res.applications.applications || [];
+    document.getElementById("applicationsBadge").textContent =
+      state.applications.filter((a) => a.status === "pending").length;
+    renderApplications();
+  } else {
+    document.getElementById("applicationsBadge").textContent = "!";
+    renderSectionError("applicationsGrid", errors.applications || "No applications returned", loadApplications);
+  }
+
+  // Audit log
+  if (res.auditLog && res.auditLog.log) {
+    state.auditLog = res.auditLog.log || [];
+    renderAuditTrail();
+  } else {
+    renderSectionError("auditTimeline", errors.auditLog || "No audit log returned", loadAuditTrail);
+  }
+
+  // Master DB info
+  if (res.dbInfo && res.dbInfo.info) {
+    renderMasterDbInfo(res.dbInfo.info);
+  } else {
+    renderInlineError(document.getElementById("masterDbId"), errors.dbInfo || "Failed to load");
+  }
+
+  // Profile
+  if (res.profile && res.profile.profile) {
+    applyProfileData(res.profile.profile);
+  } else if (errors.profile) {
+    console.warn("Profile load failed:", errors.profile);
+  }
+
+  // Email settings
+  if (res.emailSettings && res.emailSettings.settings) {
+    applyEmailSettings(res.emailSettings.settings);
+  } else if (errors.emailSettings) {
+    console.warn("Email settings load failed:", errors.emailSettings);
+  }
+}
+
+async function loadAllDataIndividually() {
+  // Promise.allSettled: every section attempts to load independently.
+  // A rejection/failure in one never prevents the others from
+  // resolving and rendering. Each loader below is itself
+  // try/catch-safe and renders its own error state on failure.
+  const results = await Promise.allSettled([
     loadStats(), loadEvents(), loadGlobalSettings(), loadPlans(),
     loadApplications(), loadAuditTrail(), loadMasterDbInfo(),
     loadProfileData(), loadEmailSettings(),
   ]);
+
+  results.forEach((r, i) => {
+    if (r.status === "rejected") {
+      console.error(`[loadAllData] section #${i} threw unexpectedly:`, r.reason);
+    }
+  });
 }
 
 // ---------------- Dashboard stats ----------------
@@ -326,9 +505,16 @@ function renderStatSkeletons() {
 
 async function loadStats() {
   renderStatSkeletons();
-  const res = await masterApi("getPlatformStats");
-  const stats = res.stats || {};
-  renderStatCards(stats);
+  try {
+    const res = await masterApi("getPlatformStats");
+    if (!res.success && !res.stats) {
+      renderSectionError("statGrid", res.error || "Failed to load stats", loadStats);
+      return;
+    }
+    renderStatCards(res.stats || {});
+  } catch (e) {
+    renderSectionError("statGrid", e.message || "Unexpected error", loadStats);
+  }
 }
 
 function renderStatCards(stats) {
@@ -378,9 +564,20 @@ function fmtDate(d) {
 // EVENTS TABLE
 // ============================================================
 async function loadEvents() {
-  const res = await masterApi("getEvents");
-  state.events = res.events || [];
-  applyEventsFilters();
+  const tbody = document.getElementById("eventsTableBody");
+  if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="padding:20px;text-align:center;color:var(--text-faint,#94a3b8);">Loading events…</td></tr>`;
+
+  try {
+    const res = await masterApi("getEvents");
+    if (!res.success && !res.events) {
+      renderSectionError("eventsTableBody", res.error || "Failed to load events", loadEvents);
+      return;
+    }
+    state.events = res.events || [];
+    applyEventsFilters();
+  } catch (e) {
+    renderSectionError("eventsTableBody", e.message || "Unexpected error", loadEvents);
+  }
 }
 
 function initEventsControls() {
@@ -418,7 +615,7 @@ function applyEventsFilters() {
       .some((f) => (f || "").toLowerCase().includes(q));
     const matchesStatus = !statusFilter || ev.status === statusFilter;
     const matchesPlan = !planFilter || ev.plan === planFilter;
-    return matchesQuery && matchesStatus && matchesPlan;
+    return matchesQuery && matchesPlan && matchesStatus;
   });
 
   rows.sort((a, b) => {
@@ -613,8 +810,13 @@ async function loadSpreadsheetPreview() {
   if (!ev) return;
   const container = document.getElementById("sheetPreview");
   container.classList.remove("hidden");
+  document.getElementById("sheetTabs").innerHTML = `<div style="padding:10px;color:var(--text-faint,#94a3b8)">Loading preview…</div>`;
 
   const res = await masterApi("getSpreadsheetPreview", { sid: ev.spreadsheetId });
+  if (!res.success && !res.sheets) {
+    renderSectionError("sheetTabs", res.error || "Failed to load spreadsheet preview", loadSpreadsheetPreview);
+    return;
+  }
   const sheets = res.sheets || {
     Settings: [], Payments: [], Complaints: [], Villages: [], Admins: [], Activity: [], Gallery: [], Audit: [],
   };
@@ -692,9 +894,20 @@ const GLOBAL_SETTINGS_DEFS = [
 ];
 
 async function loadGlobalSettings() {
-  const res = await masterApi("getGlobalSettings");
-  state.globalSettings = res.settings || {};
-  renderGlobalSettings();
+  const grid = document.getElementById("globalSettingsGrid");
+  if (grid) grid.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-faint,#94a3b8);grid-column:1/-1">Loading settings…</div>`;
+
+  try {
+    const res = await masterApi("getGlobalSettings");
+    if (!res.success && !res.settings) {
+      renderSectionError("globalSettingsGrid", res.error || "Failed to load global settings", loadGlobalSettings);
+      return;
+    }
+    state.globalSettings = res.settings || {};
+    renderGlobalSettings();
+  } catch (e) {
+    renderSectionError("globalSettingsGrid", e.message || "Unexpected error", loadGlobalSettings);
+  }
 }
 
 function renderGlobalSettings() {
@@ -741,9 +954,17 @@ const DEFAULT_PLANS = [
 ];
 
 async function loadPlans() {
-  const res = await masterApi("getSubscriptionPlans");
-  state.plans = (res.plans && res.plans.length) ? res.plans : DEFAULT_PLANS;
-  renderPlans();
+  try {
+    const res = await masterApi("getSubscriptionPlans");
+    if (!res.success && !res.plans) {
+      renderSectionError("plansGrid", res.error || "Failed to load plans", loadPlans);
+      return;
+    }
+    state.plans = (res.plans && res.plans.length) ? res.plans : DEFAULT_PLANS;
+    renderPlans();
+  } catch (e) {
+    renderSectionError("plansGrid", e.message || "Unexpected error", loadPlans);
+  }
 }
 
 function renderPlans() {
@@ -826,14 +1047,42 @@ function initEmailSettings() {
   });
 }
 
+function applyEmailSettings(s) {
+  document.getElementById("esSenderName").value = s.senderName || "";
+  document.getElementById("esReplyEmail").value = s.replyEmail || "";
+  document.getElementById("esSupportEmail").value = s.supportEmail || "";
+  document.getElementById("esOrgEmail").value = s.orgEmail || "";
+  document.getElementById("esFooter").value = s.footer || "";
+  document.getElementById("esSignature").value = s.signature || "";
+  if (s.logoUrl) {
+    document.getElementById("esLogoPreview").innerHTML =
+      `<img src="${s.logoUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`;
+  }
+  window._currentLogoUrl = s.logoUrl || "";
+}
+
 // ============================================================
 // APPLICATIONS
 // ============================================================
 async function loadApplications() {
-  const res = await masterApi("getPendingApplications");
-  state.applications = res.applications || [];
-  document.getElementById("applicationsBadge").textContent = state.applications.filter((a) => a.status === "pending").length;
-  renderApplications();
+  const badge = document.getElementById("applicationsBadge");
+  const grid = document.getElementById("applicationsGrid");
+  if (grid) grid.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-faint,#94a3b8);grid-column:1/-1">Loading applications…</div>`;
+
+  try {
+    const res = await masterApi("getPendingApplications");
+    if (!res.success && !res.applications) {
+      if (badge) badge.textContent = "!";
+      renderSectionError("applicationsGrid", res.error || "Failed to load applications", loadApplications);
+      return;
+    }
+    state.applications = res.applications || [];
+    if (badge) badge.textContent = state.applications.filter((a) => a.status === "pending").length;
+    renderApplications();
+  } catch (e) {
+    if (badge) badge.textContent = "!";
+    renderSectionError("applicationsGrid", e.message || "Unexpected error", loadApplications);
+  }
 }
 
 function initApplicationsControls() {
@@ -901,9 +1150,20 @@ function viewApplication(id) {
 // AUDIT TRAIL
 // ============================================================
 async function loadAuditTrail() {
-  const res = await masterApi("getAuditTrail");
-  state.auditLog = res.log || [];
-  renderAuditTrail();
+  const timeline = document.getElementById("auditTimeline");
+  if (timeline) timeline.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-faint,#94a3b8);">Loading audit trail…</div>`;
+
+  try {
+    const res = await masterApi("getAuditTrail");
+    if (!res.success && !res.log) {
+      renderSectionError("auditTimeline", res.error || "Failed to load audit trail", loadAuditTrail);
+      return;
+    }
+    state.auditLog = res.log || [];
+    renderAuditTrail();
+  } catch (e) {
+    renderSectionError("auditTimeline", e.message || "Unexpected error", loadAuditTrail);
+  }
 }
 function initAuditControls() {
   document.getElementById("auditSearch").addEventListener("input", debounce(renderAuditTrail, 200));
@@ -942,8 +1202,24 @@ function renderAuditTrail() {
 // MASTER DATABASE
 // ============================================================
 async function loadMasterDbInfo() {
-  const res = await masterApi("getMasterDbInfo");
-  const info = res.info || {};
+  const idEl = document.getElementById("masterDbId");
+  const backupEl = document.getElementById("masterDbLastBackup");
+  if (idEl) idEl.textContent = "Loading…";
+
+  try {
+    const res = await masterApi("getMasterDbInfo");
+    if (!res.success && !res.info) {
+      renderInlineError(idEl, res.error || "Failed to load");
+      if (backupEl) backupEl.textContent = "—";
+      return;
+    }
+    renderMasterDbInfo(res.info || {});
+  } catch (e) {
+    renderInlineError(idEl, e.message || "Unexpected error");
+  }
+}
+
+function renderMasterDbInfo(info) {
   document.getElementById("masterDbId").textContent = info.spreadsheetId || "Not connected";
   document.getElementById("masterDbLastBackup").textContent = info.lastBackup ? fmtDate(info.lastBackup) : "No backup yet";
 
@@ -1027,29 +1303,36 @@ function initHeader() {
 // PROFILE DATA / EMAIL SETTINGS LOADERS
 // ============================================================
 async function loadProfileData() {
-  const res = await masterApi("getProfile");
-  if (res.success && res.profile) {
-    document.getElementById("profileUsername").value = res.profile.username || "master";
-    if (res.profile.photoUrl) {
-      document.getElementById("profilePhotoPreview").innerHTML = `<img src="${res.profile.photoUrl}" alt="Profile photo">`;
+  try {
+    const res = await masterApi("getProfile");
+    if (res.success && res.profile) {
+      applyProfileData(res.profile);
+    } else if (!res.success) {
+      console.warn("Profile load failed:", res.error);
     }
+  } catch (e) {
+    console.warn("Profile load failed:", e.message);
+  }
+}
+
+function applyProfileData(profile) {
+  document.getElementById("profileUsername").value = profile.username || "master";
+  if (profile.photoUrl) {
+    document.getElementById("profilePhotoPreview").innerHTML = `<img src="${profile.photoUrl}" alt="Profile photo">`;
   }
 }
 
 async function loadEmailSettings() {
-  const res = await masterApi("getEmailSettings");
-  const s = res.settings || {};
-  document.getElementById("esSenderName").value = s.senderName || "";
-  document.getElementById("esReplyEmail").value = s.replyEmail || "";
-  document.getElementById("esSupportEmail").value = s.supportEmail || "";
-  document.getElementById("esOrgEmail").value = s.orgEmail || "";
-  document.getElementById("esFooter").value = s.footer || "";
-  document.getElementById("esSignature").value = s.signature || "";
-  if (s.logoUrl) {
-    document.getElementById("esLogoPreview").innerHTML =
-      `<img src="${s.logoUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`;
+  try {
+    const res = await masterApi("getEmailSettings");
+    if (res.success || res.settings) {
+      applyEmailSettings(res.settings || {});
+    } else {
+      console.warn("Email settings load failed:", res.error);
+    }
+  } catch (e) {
+    console.warn("Email settings load failed:", e.message);
   }
-  window._currentLogoUrl = s.logoUrl || "";
 }
 
 // ============================================================
