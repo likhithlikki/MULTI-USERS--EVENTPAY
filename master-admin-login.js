@@ -1,21 +1,10 @@
 // ============================================================
 // EventPay — master-admin_login.js
-// MASTER ADMIN dashboard. Manages ONLY the Master Database — this
-// is NOT an event admin panel. Frontend only: every backend call is
-// a clearly-marked placeholder function ready for Apps Script wiring.
-//
-// Authentication: there is exactly ONE master admin. Login is
-// password-only (no username) — checked against the MASTER-ADMIN-PASS
-// Apps Script Property on the backend. See loginMasterAdmin().
+// MASTER ADMIN dashboard. Manages ONLY the Master Database.
+// Authentication: single master admin, password-only, checked
+// server-side via masterLogin action.
 // ============================================================
 
-// ------------------------------------------------------------
-// CONFIG — mirrors the shape of the app's shared config.js so this
-// page can be wired to the same backend with minimal changes later.
-// Replace SCRIPT_URL with the project's Apps Script Web App URL, or
-// leave as-is and let a shared config.js (loaded before this file)
-// define window.APP_CONFIG instead.
-// ------------------------------------------------------------
 const MASTER_CONFIG = {
   SCRIPT_URL: APP_CONFIG.SCRIPT_URL,
   SESSION_MINUTES: 60,
@@ -30,13 +19,12 @@ const MASTER_CONFIG = {
 console.log("APP_CONFIG =", APP_CONFIG);
 console.log("SCRIPT_URL =", APP_CONFIG.SCRIPT_URL);
 console.log("MASTER_CONFIG =", MASTER_CONFIG);
+
 // ============================================================
-// STATE — single in-memory store for this page. Nothing here is
-// persisted except the auth token/expiry (and only if the backend
-// issues one) and the theme preference.
+// STATE
 // ============================================================
 const state = {
-  events: [],          // full event list from Master DB (getEvents-style action)
+  events: [],
   filteredEvents: [],
   eventsPage: 1,
   eventsPageSize: 10,
@@ -51,10 +39,6 @@ const state = {
 
 // ============================================================
 // GENERIC API HELPER
-// Every backend call funnels through here. Talks to the Apps Script
-// Web App deployed from master-admin-backend.gs. The session token
-// (from masterLogin) is attached to every call automatically except
-// masterLogin itself.
 // ============================================================
 async function masterApi(action, params = {}, method = "GET") {
   if (!MASTER_CONFIG.SCRIPT_URL) {
@@ -107,9 +91,7 @@ function escapeHtml(str) {
 }
 
 // ============================================================
-// CONFIRM DIALOG — generic reusable confirmation, used by every
-// destructive action (deactivate, delete, restore backup, etc).
-// Usage: confirmDialog({ title, message, confirmLabel }).then(ok => ...)
+// CONFIRM DIALOG
 // ============================================================
 function confirmDialog({ title = "Are you sure?", message = "This action cannot be undone.", confirmLabel = "Confirm" } = {}) {
   const overlay = document.getElementById("confirmOverlay");
@@ -136,11 +118,6 @@ function confirmDialog({ title = "Are you sure?", message = "This action cannot 
 
 // ============================================================
 // ICON HELPER
-// Lucide's createIcons() replaces each <i data-lucide="..."> with a
-// real <svg> element, so re-querying for "i" after the first render
-// finds nothing. This helper resets the icon slot's HTML back to a
-// fresh <i data-lucide> before re-running createIcons(), so it's safe
-// to call repeatedly (e.g. toggling eye/eye-off, moon/sun).
 // ============================================================
 function setIcon(container, name) {
   if (!container) return;
@@ -168,7 +145,7 @@ function toggleTheme() {
 }
 
 // ============================================================
-// LOGIN FLOW (password only — single master admin)
+// LOGIN FLOW
 // ============================================================
 function initLogin() {
   const form = document.getElementById("loginForm");
@@ -207,7 +184,6 @@ function initLogin() {
   document.getElementById("closeForgotBtn").addEventListener("click", closeForgotModal);
   document.getElementById("forgotOkBtn").addEventListener("click", closeForgotModal);
 
-  // Auto-login if a valid remembered session exists.
   if (hasValidSession()) enterDashboard();
 }
 
@@ -222,8 +198,6 @@ function setLoginLoading(loading) {
   btn.disabled = loading;
 }
 
-// Checks the single MASTER-ADMIN-PASS property on the backend via the
-// masterLogin action and stores the returned session token.
 async function loginMasterAdmin(password, remember) {
   const res = await masterApi("masterLogin", { password }, "POST");
   if (!res.success) {
@@ -314,8 +288,7 @@ function switchView(viewName) {
 }
 
 // ============================================================
-// DATA LOADING — placeholder calls, all can fail silently since
-// every render function tolerates empty state.
+// DATA LOADING
 // ============================================================
 async function loadAllData() {
   await Promise.all([
@@ -353,9 +326,8 @@ function renderStatSkeletons() {
 
 async function loadStats() {
   renderStatSkeletons();
-  // TODO(backend): const res = await masterApi("getPlatformStats");
   const res = await masterApi("getPlatformStats");
-  const stats = res.stats || {}; // all zero/undefined until backend connected
+  const stats = res.stats || {};
   renderStatCards(stats);
 }
 
@@ -379,7 +351,6 @@ function renderStatCards(stats) {
   animateCounters();
 }
 
-// Simple count-up animation for numeric stat cards.
 function animateCounters() {
   document.querySelectorAll(".stat-card-value[data-count]").forEach((el) => {
     const target = Number(el.dataset.count) || 0;
@@ -407,7 +378,6 @@ function fmtDate(d) {
 // EVENTS TABLE
 // ============================================================
 async function loadEvents() {
-  // TODO(backend): const res = await masterApi("getEvents");
   const res = await masterApi("getEvents");
   state.events = res.events || [];
   applyEventsFilters();
@@ -519,7 +489,6 @@ function statusBadge(status) {
 }
 
 function exportEventsCsv() {
-  // TODO(backend): could also request a server-generated export.
   const rows = state.filteredEvents;
   if (!rows.length) { toast("No events to export", "warning"); return; }
   const headers = ["eventId","eventCode","eventName","organizerName","organizerPhone","organizerEmail","plan","status","createdDate"];
@@ -538,19 +507,18 @@ function downloadTextFile(filename, content) {
   URL.revokeObjectURL(a.href);
 }
 
-// ---------------- row action placeholders ----------------
+// ---------------- row actions ----------------
 async function deactivateEvent(eventId) {
   const ok = await confirmDialog({
     title: "Deactivate this event?",
-    message: "Organizers and attendees will lose access until it's reactivated.",
+    message: "Organizers lose access until reactivated.",
     confirmLabel: "Deactivate",
   });
   if (!ok) return;
-  // TODO(backend): await masterApi("deactivateEvent", { eventId }, "POST");
-  toast("Event deactivated", "success");
+  const res = await masterApi("deactivateEvent", { eventId }, "POST");
+  toast(res.success ? "Event deactivated" : (res.error || "Failed"), res.success ? "success" : "error");
   loadEvents();
 }
-
 
 async function deleteEvent(eventId) {
   const ok = await confirmDialog({
@@ -628,9 +596,15 @@ function copyToClipboard(text, successMsg) {
   navigator.clipboard?.writeText(text).then(() => toast(successMsg, "success"))
     .catch(() => toast("Couldn't copy — copy manually", "error"));
 }
+
 async function downloadEventBackup(ev) {
-  // TODO(backend): await masterApi("downloadEventBackup", { eventId: ev.eventId });
-  toast("Backup requested — this will download once the backend is connected", "info");
+  const res = await masterApi("downloadEventBackup", { eventId: ev.eventId }, "POST");
+  if (res.success && res.url) {
+    window.open(res.url, "_blank", "noopener");
+    toast("Backup ready", "success");
+  } else {
+    toast(res.error || "Backup failed", "error");
+  }
 }
 
 // ---------------- Spreadsheet Preview ----------------
@@ -640,7 +614,6 @@ async function loadSpreadsheetPreview() {
   const container = document.getElementById("sheetPreview");
   container.classList.remove("hidden");
 
-  // TODO(backend): const res = await masterApi("getSpreadsheetPreview", { sid: ev.spreadsheetId });
   const res = await masterApi("getSpreadsheetPreview", { sid: ev.spreadsheetId });
   const sheets = res.sheets || {
     Settings: [], Payments: [], Complaints: [], Villages: [], Admins: [], Activity: [], Gallery: [], Audit: [],
@@ -676,7 +649,7 @@ function showSheetData(name, rows) {
 function renderSheetGrid(rows) {
   const table = document.getElementById("sheetGridTable");
   if (!rows.length) {
-    table.innerHTML = `<tr><td style="padding:20px;text-align:center;color:var(--text-faint)">No data in this sheet yet — read-only preview will populate once the backend is connected.</td></tr>`;
+    table.innerHTML = `<tr><td style="padding:20px;text-align:center;color:var(--text-faint)">No data in this sheet yet.</td></tr>`;
     return;
   }
   const headers = Object.keys(rows[0]);
@@ -699,7 +672,7 @@ function downloadActiveSheetCsv() {
 }
 
 // ============================================================
-// GLOBAL SETTINGS (toggle cards, no tables)
+// GLOBAL SETTINGS
 // ============================================================
 const GLOBAL_SETTINGS_DEFS = [
   ["sendEventCreatedEmail", "Send Event Created Email", "Notify the organizer as soon as their event is created."],
@@ -719,7 +692,6 @@ const GLOBAL_SETTINGS_DEFS = [
 ];
 
 async function loadGlobalSettings() {
-  // TODO(backend): const res = await masterApi("getGlobalSettings");
   const res = await masterApi("getGlobalSettings");
   state.globalSettings = res.settings || {};
   renderGlobalSettings();
@@ -755,8 +727,8 @@ async function saveGlobalSettings() {
   document.querySelectorAll("#globalSettingsGrid [data-setting]").forEach((el) => {
     payload[el.dataset.setting] = el.type === "checkbox" ? el.checked : Number(el.value);
   });
-  // TODO(backend): await masterApi("saveGlobalSettings", payload, "POST");
-  toast("Global settings saved", "success");
+  const res = await masterApi("saveGlobalSettings", payload, "POST");
+  toast(res.success ? "Global settings saved" : (res.error || "Save failed"), res.success ? "success" : "error");
 }
 
 // ============================================================
@@ -769,7 +741,6 @@ const DEFAULT_PLANS = [
 ];
 
 async function loadPlans() {
-  // TODO(backend): const res = await masterApi("getSubscriptionPlans");
   const res = await masterApi("getSubscriptionPlans");
   state.plans = (res.plans && res.plans.length) ? res.plans : DEFAULT_PLANS;
   renderPlans();
@@ -797,8 +768,8 @@ function renderPlans() {
 async function savePlan(planId) {
   const input = document.querySelector(`.plan-price-input[data-plan="${planId}"]`);
   const price = Number(input.value);
-  // TODO(backend): await masterApi("updatePlanPrice", { planId, price }, "POST");
-  toast(`${planId} plan price updated to ${fmtINR(price)}`, "success");
+  const res = await masterApi("updatePlanPrice", { planId, price }, "POST");
+  toast(res.success ? `${planId} plan updated to ${fmtINR(price)}` : (res.error || "Failed"), res.success ? "success" : "error");
 }
 
 // ============================================================
@@ -814,8 +785,8 @@ function initPaymentGateway() {
       webhook: document.getElementById("pgWebhook").value,
       testMode: document.getElementById("pgTestMode").checked,
     };
-    // TODO(backend): await masterApi("savePaymentGatewaySettings", payload, "POST");
-    toast("Payment gateway settings saved", "success");
+    const res = await masterApi("savePaymentGatewaySettings", payload, "POST");
+    toast(res.success ? "Payment gateway settings saved" : (res.error || "Failed"), res.success ? "success" : "error");
   });
 }
 
@@ -830,20 +801,35 @@ function initEmailSettings() {
     const reader = new FileReader();
     reader.onload = () => {
       document.getElementById("esLogoPreview").innerHTML = `<img src="${reader.result}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`;
+      window._currentLogoUrl = reader.result;
     };
     reader.readAsDataURL(file);
   });
+
   document.getElementById("sendTestEmailBtn").addEventListener("click", async () => {
-    // TODO(backend): await masterApi("sendTestEmail", {}, "POST");
-    toast("Test email queued", "info");
+    const res = await masterApi("sendTestEmail", {}, "POST");
+    toast(res.success ? "Test email sent" : (res.error || "Failed"), res.success ? "success" : "error");
   });
 
+  document.getElementById("saveEmailSettingsBtn").addEventListener("click", async () => {
+    const payload = {
+      senderName: document.getElementById("esSenderName").value,
+      replyEmail: document.getElementById("esReplyEmail").value,
+      supportEmail: document.getElementById("esSupportEmail").value,
+      orgEmail: document.getElementById("esOrgEmail").value,
+      footer: document.getElementById("esFooter").value,
+      signature: document.getElementById("esSignature").value,
+      logoUrl: window._currentLogoUrl || "",
+    };
+    const res = await masterApi("saveEmailSettings", payload, "POST");
+    toast(res.success ? "Email settings saved" : (res.error || "Failed"), res.success ? "success" : "error");
+  });
+}
 
 // ============================================================
 // APPLICATIONS
 // ============================================================
 async function loadApplications() {
-  // TODO(backend): const res = await masterApi("getPendingApplications");
   const res = await masterApi("getPendingApplications");
   state.applications = res.applications || [];
   document.getElementById("applicationsBadge").textContent = state.applications.filter((a) => a.status === "pending").length;
@@ -895,28 +881,26 @@ function renderApplications() {
 }
 
 async function approveApplication(id) {
-  // TODO(backend): await masterApi("approveApplication", { id }, "POST");
-  toast("Application approved", "success");
+  const res = await masterApi("approveApplication", { id }, "POST");
+  toast(res.success ? "Application approved" : (res.error || "Failed"), res.success ? "success" : "error");
   loadApplications();
 }
 async function rejectApplication(id) {
   const ok = await confirmDialog({ title: "Reject this application?", message: "The organizer will be notified.", confirmLabel: "Reject" });
   if (!ok) return;
-  // TODO(backend): await masterApi("rejectApplication", { id }, "POST");
-  toast("Application rejected", "success");
+  const res = await masterApi("rejectApplication", { id }, "POST");
+  toast(res.success ? "Application rejected" : (res.error || "Failed"), res.success ? "success" : "error");
   loadApplications();
 }
 function viewApplication(id) {
   const app = state.applications.find((a) => String(a.id) === String(id));
   toast(app ? `Viewing ${app.eventName || "application"}` : "Application not found", "info");
-  // TODO: open a details modal once the backend supplies full application data.
 }
 
 // ============================================================
 // AUDIT TRAIL
 // ============================================================
 async function loadAuditTrail() {
-  // TODO(backend): const res = await masterApi("getAuditTrail");
   const res = await masterApi("getAuditTrail");
   state.auditLog = res.log || [];
   renderAuditTrail();
@@ -958,7 +942,6 @@ function renderAuditTrail() {
 // MASTER DATABASE
 // ============================================================
 async function loadMasterDbInfo() {
-  // TODO(backend): const res = await masterApi("getMasterDbInfo");
   const res = await masterApi("getMasterDbInfo");
   const info = res.info || {};
   document.getElementById("masterDbId").textContent = info.spreadsheetId || "Not connected";
@@ -967,120 +950,49 @@ async function loadMasterDbInfo() {
   document.getElementById("openMasterDbBtn").onclick = () => openUrl(sheetUrlFromId(info.spreadsheetId));
   document.getElementById("copyMasterDbIdBtn").onclick = () => copyToClipboard(info.spreadsheetId, "Master Spreadsheet ID copied");
 }
+
 function initMasterDatabaseControls() {
+  document.getElementById("createBackupBtn").addEventListener("click", async () => {
+    const res = await masterApi("createMasterBackup", {}, "POST");
+    toast(res.success ? "Backup created" : (res.error || "Backup failed"), res.success ? "success" : "error");
+    loadMasterDbInfo();
+  });
+
   document.getElementById("downloadMasterBackupBtn").addEventListener("click", async () => {
-    // TODO(backend): await masterApi("downloadMasterBackup");
-    toast("Backup download requested", "info");
+    const res = await masterApi("downloadMasterBackup");
+    if (res.success && res.url) window.open(res.url, "_blank");
+    else toast(res.error || "No backup found", "error");
   });
-// Backup:
-document.getElementById("createBackupBtn").addEventListener("click", async () => {
-  const res = await masterApi("createMasterBackup", {}, "POST");
-  toast(res.success ? "Backup created" : (res.error || "Backup failed"), res.success ? "success" : "error");
-  loadMasterDbInfo();
-});
-document.getElementById("downloadMasterBackupBtn").addEventListener("click", async () => {
-  const res = await masterApi("downloadMasterBackup");
-  if (res.success && res.url) window.open(res.url, "_blank");
-  else toast(res.error || "No backup found", "error");
-});
-document.getElementById("restoreBackupBtn").addEventListener("click", async () => {
-  const ok = await confirmDialog({ title: "Restore Master Database?", message: "This overwrites current data.", confirmLabel: "Restore" });
-  if (!ok) return;
-  const res = await masterApi("restoreMasterBackup", {}, "POST");
-  toast(res.success ? "Master Database restored" : (res.error || "Restore failed"), res.success ? "success" : "error");
-});
 
-// Deactivate/Delete event:
-async function deactivateEvent(eventId) {
-  const ok = await confirmDialog({ title: "Deactivate this event?", message: "Organizers lose access until reactivated.", confirmLabel: "Deactivate" });
-  if (!ok) return;
-  const res = await masterApi("deactivateEvent", { eventId }, "POST");
-  toast(res.success ? "Event deactivated" : (res.error || "Failed"), res.success ? "success" : "error");
-  loadEvents();
-}
-
-  
-async function downloadEventBackup(ev) {
-  const res = await masterApi("downloadEventBackup", { eventId: ev.eventId }, "POST");
-  if (res.success && res.url) {
-    window.open(res.url, "_blank", "noopener");
-    toast("Backup ready", "success");
-  } else {
-    toast(res.error || "Backup failed", "error");
-  }
-}
-
-// Global settings save:
-async function saveGlobalSettings() {
-  const payload = {};
-  document.querySelectorAll("#globalSettingsGrid [data-setting]").forEach((el) => {
-    payload[el.dataset.setting] = el.type === "checkbox" ? el.checked : Number(el.value);
+  document.getElementById("restoreBackupBtn").addEventListener("click", async () => {
+    const ok = await confirmDialog({ title: "Restore Master Database?", message: "This overwrites current data.", confirmLabel: "Restore" });
+    if (!ok) return;
+    const res = await masterApi("restoreMasterBackup", {}, "POST");
+    toast(res.success ? "Master Database restored" : (res.error || "Restore failed"), res.success ? "success" : "error");
   });
-  const res = await masterApi("saveGlobalSettings", payload, "POST");
-  toast(res.success ? "Global settings saved" : (res.error || "Save failed"), res.success ? "success" : "error");
 }
 
-// Plan save:
-async function savePlan(planId) {
-  const input = document.querySelector(`.plan-price-input[data-plan="${planId}"]`);
-  const price = Number(input.value);
-  const res = await masterApi("updatePlanPrice", { planId, price }, "POST");
-  toast(res.success ? `${planId} plan updated to ${fmtINR(price)}` : (res.error || "Failed"), res.success ? "success" : "error");
+// ============================================================
+// PROFILE / CHANGE PASSWORD
+// ============================================================
+function initProfile() {
+  document.getElementById("profilePhotoUploadBtn").addEventListener("click", () => document.getElementById("profilePhotoUpload").click());
+  document.getElementById("profilePhotoUpload").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      document.getElementById("profilePhotoPreview").innerHTML = `<img src="${reader.result}" alt="Profile photo">`;
+      const res = await masterApi("saveProfile", { photoUrl: reader.result }, "POST");
+      toast(res.success ? "Photo saved" : "Failed to save photo", res.success ? "success" : "error");
+    };
+    reader.readAsDataURL(file);
+  });
+
+  document.getElementById("profileThemeToggle").addEventListener("change", toggleTheme);
+  document.getElementById("profileLogoutBtn").addEventListener("click", logoutMasterAdmin);
 }
 
-// Payment gateway save:
-document.getElementById("savePaymentGatewayBtn").addEventListener("click", async () => {
-  const payload = {
-    enabled: document.getElementById("pgEnabled").checked,
-    provider: document.getElementById("pgProvider").value,
-    merchantId: document.getElementById("pgMerchantId").value,
-    secret: document.getElementById("pgSecret").value,
-    webhook: document.getElementById("pgWebhook").value,
-    testMode: document.getElementById("pgTestMode").checked,
-  };
-  const res = await masterApi("savePaymentGatewaySettings", payload, "POST");
-  toast(res.success ? "Payment gateway settings saved" : (res.error || "Failed"), res.success ? "success" : "error");
-});
-
-// Email settings save + test:
-document.getElementById("sendTestEmailBtn").addEventListener("click", async () => {
-  const res = await masterApi("sendTestEmail", {}, "POST");
-  toast(res.success ? "Test email sent" : (res.error || "Failed"), res.success ? "success" : "error");
-});
-
-
-
-  document.getElementById("saveEmailSettingsBtn").addEventListener("click", async () => {
-  const payload = {
-    senderName: document.getElementById("esSenderName").value,
-    replyEmail: document.getElementById("esReplyEmail").value,
-    supportEmail: document.getElementById("esSupportEmail").value,
-    orgEmail: document.getElementById("esOrgEmail").value,
-    footer: document.getElementById("esFooter").value,
-    signature: document.getElementById("esSignature").value,
-    logoUrl: window._currentLogoUrl || "",
-  };
-  const res = await masterApi("saveEmailSettings", payload, "POST");
-  toast(res.success ? "Email settings saved" : (res.error || "Failed"), res.success ? "success" : "error");
-});
-
-  
-
-// Approve/reject application:
-async function approveApplication(id) {
-  const res = await masterApi("approveApplication", { id }, "POST");
-  toast(res.success ? "Application approved" : (res.error || "Failed"), res.success ? "success" : "error");
-  loadApplications();
-}
-async function rejectApplication(id) {
-  const ok = await confirmDialog({ title: "Reject this application?", message: "The organizer will be notified.", confirmLabel: "Reject" });
-  if (!ok) return;
-  const res = await masterApi("rejectApplication", { id }, "POST");
-  toast(res.success ? "Application rejected" : (res.error || "Failed"), res.success ? "success" : "error");
-  loadApplications();
-}
-
-// Change password:
 document.getElementById("changePasswordBtn").addEventListener("click", async () => {
   const current = document.getElementById("pwCurrent").value;
   const next = document.getElementById("pwNew").value;
@@ -1095,39 +1007,6 @@ document.getElementById("changePasswordBtn").addEventListener("click", async () 
     document.getElementById("pwConfirm").value = "";
   }
 });
-// ============================================================
-// PROFILE
-// ============================================================
-function initProfile() {
-  document.getElementById("profilePhotoUploadBtn").addEventListener("click", () => document.getElementById("profilePhotoUpload").click());
-document.getElementById("profilePhotoUpload").addEventListener("change", (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = async () => {
-    document.getElementById("profilePhotoPreview").innerHTML = `<img src="${reader.result}" alt="Profile photo">`;
-    const res = await masterApi("saveProfile", { photoUrl: reader.result }, "POST");
-    toast(res.success ? "Photo saved" : "Failed to save photo", res.success ? "success" : "error");
-  };
-  reader.readAsDataURL(file);
-});
-
-  document.getElementById("changePasswordBtn").addEventListener("click", async () => {
-    const current = document.getElementById("pwCurrent").value;
-    const next = document.getElementById("pwNew").value;
-    const confirm = document.getElementById("pwConfirm").value;
-    if (!current || !next) { toast("Fill in all password fields", "warning"); return; }
-    if (next !== confirm) { toast("New passwords don't match", "error"); return; }
-    // TODO(backend): await masterApi("changeMasterPassword", { current, next }, "POST");
-    toast("Password updated", "success");
-    document.getElementById("pwCurrent").value = "";
-    document.getElementById("pwNew").value = "";
-    document.getElementById("pwConfirm").value = "";
-  });
-
-  document.getElementById("profileThemeToggle").addEventListener("change", toggleTheme);
-  document.getElementById("profileLogoutBtn").addEventListener("click", logoutMasterAdmin);
-}
 
 // ============================================================
 // HEADER ACTIONS
@@ -1145,25 +1024,8 @@ function initHeader() {
 }
 
 // ============================================================
-// INIT
+// PROFILE DATA / EMAIL SETTINGS LOADERS
 // ============================================================
-document.addEventListener("DOMContentLoaded", () => {
-  initTheme();
-  initLogin();
-  initNavigation();
-  initEventsControls();
-  initPaymentGateway();
-  initEmailSettings();
-  initApplicationsControls();
-  initAuditControls();
-  initMasterDatabaseControls();
-  initProfile();
-  initHeader();
-  if (window.lucide) lucide.createIcons();
-});
-
-
-  
 async function loadProfileData() {
   const res = await masterApi("getProfile");
   if (res.success && res.profile) {
@@ -1190,4 +1052,20 @@ async function loadEmailSettings() {
   window._currentLogoUrl = s.logoUrl || "";
 }
 
-
+// ============================================================
+// INIT
+// ============================================================
+document.addEventListener("DOMContentLoaded", () => {
+  initTheme();
+  initLogin();
+  initNavigation();
+  initEventsControls();
+  initPaymentGateway();
+  initEmailSettings();
+  initApplicationsControls();
+  initAuditControls();
+  initMasterDatabaseControls();
+  initProfile();
+  initHeader();
+  if (window.lucide) lucide.createIcons();
+});
