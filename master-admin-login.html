@@ -44,9 +44,6 @@
     </div>
 
     <form id="loginForm" class="login-form" autocomplete="off">
-      <!-- Password only — there is a single Master Admin, authenticated
-           against the MASTER-ADMIN-PASS Apps Script property. No username
-           field: identity is fixed, only the secret varies. -->
       <label class="field">
         <span class="field-label">Master Password</span>
         <div class="field-input-wrap">
@@ -76,7 +73,7 @@
       <p class="login-error hidden" id="loginError"></p>
     </form>
 
-    <div class="login-footer">EventPay &middot; Master Control Layer &middot; v4.0</div>
+    <div class="login-footer">EventPay &middot; Master Control Layer &middot; v4.1</div>
   </div>
 </div>
 
@@ -139,7 +136,12 @@
         <button class="nav-item" data-view="profile"><i data-lucide="user-circle"></i><span>Profile</span></button>
       </nav>
       <div class="sidebar-footer">
-        <div class="sidebar-status"><span class="status-dot online"></span> Backend not connected</div>
+        <!-- §2: dot + label now have ids and are driven by setBackendStatus()
+             in JS instead of being hardcoded to "Backend not connected". -->
+        <div class="sidebar-status">
+          <span class="status-dot pending" id="sidebarStatusDot"></span>
+          <span id="sidebarStatusLabel">Connecting…</span>
+        </div>
       </div>
     </aside>
     <div class="sidebar-scrim" id="sidebarScrim"></div>
@@ -446,7 +448,7 @@
         <div class="view-head">
           <div>
             <h2>Applications</h2>
-            <p class="view-sub">Pending event applications awaiting review</p>
+            <p class="view-sub">Pending event applications and subscription payments awaiting review</p>
           </div>
         </div>
 
@@ -469,7 +471,7 @@
         <div class="empty-state hidden" id="applicationsEmptyState">
           <i data-lucide="inbox"></i>
           <h3>No pending applications</h3>
-          <p>New organizer applications will appear here for approval.</p>
+          <p>New organizer applications and manual subscription payments will appear here for approval.</p>
         </div>
       </section>
 
@@ -553,10 +555,23 @@
           </div>
           <div class="setting-row">
             <div>
-              <div class="setting-title">Restore Backup</div>
-              <div class="setting-desc">Roll the Master Database back to a previous snapshot.</div>
+              <div class="setting-title">Restore from a specific backup</div>
+              <div class="setting-desc">Pick a snapshot below — Restore always targets that exact file.</div>
             </div>
             <button class="btn btn-danger btn-sm" id="restoreBackupBtn"><i data-lucide="rotate-ccw"></i>Restore</button>
+          </div>
+        </div>
+
+        <!-- §9: real, per-entry backup list fed by listMasterBackups.
+             Each row's own Restore button carries its own backupFileId,
+             fixing the old single button that always sent an empty
+             payload and could never actually restore anything. -->
+        <div class="card glass">
+          <div class="detail-block-head" style="margin-bottom:6px;">
+            <h4 style="margin:0;">Backup History</h4>
+          </div>
+          <div id="backupsList">
+            <div style="padding:14px;text-align:center;color:var(--text-faint,#94a3b8);">Loading backups…</div>
           </div>
         </div>
       </section>
