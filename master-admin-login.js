@@ -5,24 +5,34 @@
 // server-side via masterLogin action.
 //
 // RESILIENCE UPDATE:
-// - Every network call now has a hard timeout (default 20s) so a
-//   single stuck request can never hang the whole dashboard.
+// - Every network call has a hard timeout so a single stuck request
+//   can never hang the whole dashboard. Defaults: 45s for ordinary
+//   calls, 45s for login (cold starts are slow), 60s for the
+//   combined dashboard bootstrap (it does 9 sub-operations
+//   server-side in one execution). Raise MASTER_CONFIG.*_TIMEOUT_MS
+//   further if your Apps Script project is still timing out under
+//   these — there's no hard ceiling other than the browser's own
+//   fetch limits.
 // - loadAllData() uses Promise.allSettled instead of Promise.all —
 //   one section failing no longer blocks the others from rendering.
+// - If the combined bootstrap endpoint isn't deployed yet, the
+//   fallback path staggers the 9 individual calls 250ms apart
+//   instead of firing them all in the same instant — this is what
+//   was causing ALL of them to time out together (they were all
+//   competing for the same Apps Script execution slot at once).
 // - Each section renders its own error state inline ("Failed to
 //   load — <reason> [Retry]") instead of leaving a spinner forever
 //   or leaving the whole page blank.
-// - Optional single-request bootstrap (getMasterDashboardBootstrap)
-//   is tried first to avoid firing 9 parallel round-trips against
-//   the same Apps Script deployment; if that action isn't deployed
-//   yet on the backend, it automatically falls back to the original
-//   per-section calls.
+// - Events table now has both Activate and Deactivate actions —
+//   only the relevant one shows per row, based on current status.
 // ============================================================
 
 const MASTER_CONFIG = {
   SCRIPT_URL: APP_CONFIG.SCRIPT_URL,
   SESSION_MINUTES: 60,
-  REQUEST_TIMEOUT_MS: 20000,     // hard cap per network call
+  REQUEST_TIMEOUT_MS: 45000,      // hard cap per ordinary network call (was 20s)
+  LOGIN_TIMEOUT_MS: 45000,        // login can hit a cold start — give it the same room
+  BOOTSTRAP_TIMEOUT_MS: 60000,    // the combined dashboard call does 9 sub-operations server-side
   LS: {
     TOKEN: "ep_master_token",
     EXPIRY: "ep_master_expiry",
@@ -267,7 +277,7 @@ function setLoginLoading(loading) {
 }
 
 async function loginMasterAdmin(password, remember) {
-  const res = await masterApi("masterLogin", { password }, "POST");
+  const res = await masterApi("masterLogin", { password }, "POST", MASTER_CONFIG.LOGIN_TIMEOUT_MS);
   if (!res.success) {
     return { success: false, error: res.error || "Incorrect master password." };
   }
@@ -370,7 +380,7 @@ function switchView(viewName) {
 // ============================================================
 async function loadAllData() {
   if (state.bootstrapSupported) {
-    const res = await masterApi("getMasterDashboardBootstrap");
+    const res = await masterApi("getMasterDashboardBootstrap", {}, "GET", MASTER_CONFIG.BOOTSTRAP_TIMEOUT_MS);
     const looksUnsupported = !res || (res.success === false && /unknown action/i.test(res.error || ""));
 
     if (!looksUnsupported && res) {
@@ -459,16 +469,30 @@ function applyBootstrapResult(res) {
   }
 }
 
+function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
 async function loadAllDataIndividually() {
   // Promise.allSettled: every section attempts to load independently.
   // A rejection/failure in one never prevents the others from
   // resolving and rendering. Each loader below is itself
   // try/catch-safe and renders its own error state on failure.
-  const results = await Promise.allSettled([
-    loadStats(), loadEvents(), loadGlobalSettings(), loadPlans(),
-    loadApplications(), loadAuditTrail(), loadMasterDbInfo(),
-    loadProfileData(), loadEmailSettings(),
-  ]);
+  //
+  // STAGGERED START: firing all 9 calls in the exact same instant
+  // means every one of them contends for the same Apps Script
+  // execution slot at once — which is what made ALL of them time
+  // out together, not just one. Spacing the start of each call out
+  // by a small delay lets earlier ones clear the queue before later
+  // ones arrive, without meaningfully slowing down the total load.
+  const loaders = [
+    loadStats, loadEvents, loadGlobalSettings, loadPlans,
+    loadApplications, loadAuditTrail, loadMasterDbInfo,
+    loadProfileData, loadEmailSettings,
+  ];
+  const STAGGER_MS = 250;
+
+  const results = await Promise.allSettled(
+    loaders.map((fn, i) => wait(i * STAGGER_MS).then(fn))
+  );
 
   results.forEach((r, i) => {
     if (r.status === "rejected") {
@@ -668,7 +692,10 @@ function renderEventsTable() {
       <td class="col-actions">
         <div class="row-actions" onclick="event.stopPropagation()">
           <button class="icon-btn" title="View" onclick="openEventDetails('${escapeHtml(ev.eventId)}')"><i data-lucide="eye"></i></button>
-          <button class="icon-btn" title="Deactivate" onclick="deactivateEvent('${escapeHtml(ev.eventId)}')"><i data-lucide="power"></i></button>
+          ${ev.status === "Active"
+            ? `<button class="icon-btn" title="Deactivate" onclick="deactivateEvent('${escapeHtml(ev.eventId)}')"><i data-lucide="power-off"></i></button>`
+            : `<button class="icon-btn" title="Activate" onclick="activateEvent('${escapeHtml(ev.eventId)}')"><i data-lucide="power"></i></button>`
+          }
           <button class="icon-btn" title="Delete" onclick="deleteEvent('${escapeHtml(ev.eventId)}')"><i data-lucide="trash-2"></i></button>
         </div>
       </td>
@@ -705,6 +732,18 @@ function downloadTextFile(filename, content) {
 }
 
 // ---------------- row actions ----------------
+async function activateEvent(eventId) {
+  const ok = await confirmDialog({
+    title: "Activate this event?",
+    message: "Organizers and the public site regain access immediately.",
+    confirmLabel: "Activate",
+  });
+  if (!ok) return;
+  const res = await masterApi("activateEvent", { eventId }, "POST");
+  toast(res.success ? "Event activated" : (res.error || "Failed"), res.success ? "success" : "error");
+  loadEvents();
+}
+
 async function deactivateEvent(eventId) {
   const ok = await confirmDialog({
     title: "Deactivate this event?",
@@ -769,6 +808,7 @@ function handleEventDetailAction(action) {
   const ev = state.selectedEvent;
   if (!ev) return;
   const openers = {
+    toggleEventStatus: () => (ev.status === "Active" ? deactivateEvent(ev.eventId) : activateEvent(ev.eventId)),
     openSpreadsheet: () => openUrl(ev.spreadsheetLink || sheetUrlFromId(ev.spreadsheetId)),
     copySpreadsheetId: () => copyToClipboard(ev.spreadsheetId, "Spreadsheet ID copied"),
     openParentFolder: () => openUrl(ev.parentFolderLink),
