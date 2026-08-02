@@ -986,37 +986,135 @@ function initMasterDatabaseControls() {
     // TODO(backend): await masterApi("downloadMasterBackup");
     toast("Backup download requested", "info");
   });
-  document.getElementById("createBackupBtn").addEventListener("click", async () => {
-    // TODO(backend): await masterApi("createMasterBackup", {}, "POST");
-    toast("Backup created", "success");
-    loadMasterDbInfo();
-  });
-  document.getElementById("restoreBackupBtn").addEventListener("click", async () => {
-    const ok = await confirmDialog({
-      title: "Restore Master Database?",
-      message: "This will overwrite the current Master Database with the selected backup. This cannot be undone.",
-      confirmLabel: "Restore",
-    });
-    if (!ok) return;
-    // TODO(backend): await masterApi("restoreMasterBackup", {}, "POST");
-    toast("Master Database restored", "success");
-  });
+// Backup:
+document.getElementById("createBackupBtn").addEventListener("click", async () => {
+  const res = await masterApi("createMasterBackup", {}, "POST");
+  toast(res.success ? "Backup created" : (res.error || "Backup failed"), res.success ? "success" : "error");
+  loadMasterDbInfo();
+});
+document.getElementById("downloadMasterBackupBtn").addEventListener("click", async () => {
+  const res = await masterApi("downloadMasterBackup");
+  if (res.success && res.url) window.open(res.url, "_blank");
+  else toast(res.error || "No backup found", "error");
+});
+document.getElementById("restoreBackupBtn").addEventListener("click", async () => {
+  const ok = await confirmDialog({ title: "Restore Master Database?", message: "This overwrites current data.", confirmLabel: "Restore" });
+  if (!ok) return;
+  const res = await masterApi("restoreMasterBackup", {}, "POST");
+  toast(res.success ? "Master Database restored" : (res.error || "Restore failed"), res.success ? "success" : "error");
+});
+
+// Deactivate/Delete event:
+async function deactivateEvent(eventId) {
+  const ok = await confirmDialog({ title: "Deactivate this event?", message: "Organizers lose access until reactivated.", confirmLabel: "Deactivate" });
+  if (!ok) return;
+  const res = await masterApi("deactivateEvent", { eventId }, "POST");
+  toast(res.success ? "Event deactivated" : (res.error || "Failed"), res.success ? "success" : "error");
+  loadEvents();
+}
+async function deleteEvent(eventId) {
+  const ok = await confirmDialog({ title: "Delete this event permanently?", message: "Removes it from the Master Database.", confirmLabel: "Delete" });
+  if (!ok) return;
+  const res = await masterApi("deleteEvent", { eventId }, "POST");
+  toast(res.success ? "Event deleted" : (res.error || "Failed"), res.success ? "success" : "error");
+  loadEvents();
 }
 
+// Global settings save:
+async function saveGlobalSettings() {
+  const payload = {};
+  document.querySelectorAll("#globalSettingsGrid [data-setting]").forEach((el) => {
+    payload[el.dataset.setting] = el.type === "checkbox" ? el.checked : Number(el.value);
+  });
+  const res = await masterApi("saveGlobalSettings", payload, "POST");
+  toast(res.success ? "Global settings saved" : (res.error || "Save failed"), res.success ? "success" : "error");
+}
+
+// Plan save:
+async function savePlan(planId) {
+  const input = document.querySelector(`.plan-price-input[data-plan="${planId}"]`);
+  const price = Number(input.value);
+  const res = await masterApi("updatePlanPrice", { planId, price }, "POST");
+  toast(res.success ? `${planId} plan updated to ${fmtINR(price)}` : (res.error || "Failed"), res.success ? "success" : "error");
+}
+
+// Payment gateway save:
+document.getElementById("savePaymentGatewayBtn").addEventListener("click", async () => {
+  const payload = {
+    enabled: document.getElementById("pgEnabled").checked,
+    provider: document.getElementById("pgProvider").value,
+    merchantId: document.getElementById("pgMerchantId").value,
+    secret: document.getElementById("pgSecret").value,
+    webhook: document.getElementById("pgWebhook").value,
+    testMode: document.getElementById("pgTestMode").checked,
+  };
+  const res = await masterApi("savePaymentGatewaySettings", payload, "POST");
+  toast(res.success ? "Payment gateway settings saved" : (res.error || "Failed"), res.success ? "success" : "error");
+});
+
+// Email settings save + test:
+document.getElementById("sendTestEmailBtn").addEventListener("click", async () => {
+  const res = await masterApi("sendTestEmail", {}, "POST");
+  toast(res.success ? "Test email sent" : (res.error || "Failed"), res.success ? "success" : "error");
+});
+document.getElementById("saveEmailSettingsBtn").addEventListener("click", async () => {
+  const payload = {
+    senderName: document.getElementById("esSenderName").value,
+    replyEmail: document.getElementById("esReplyEmail").value,
+    supportEmail: document.getElementById("esSupportEmail").value,
+    orgEmail: document.getElementById("esOrgEmail").value,
+    footer: document.getElementById("esFooter").value,
+    signature: document.getElementById("esSignature").value,
+  };
+  const res = await masterApi("saveEmailSettings", payload, "POST");
+  toast(res.success ? "Email settings saved" : (res.error || "Failed"), res.success ? "success" : "error");
+});
+
+// Approve/reject application:
+async function approveApplication(id) {
+  const res = await masterApi("approveApplication", { id }, "POST");
+  toast(res.success ? "Application approved" : (res.error || "Failed"), res.success ? "success" : "error");
+  loadApplications();
+}
+async function rejectApplication(id) {
+  const ok = await confirmDialog({ title: "Reject this application?", message: "The organizer will be notified.", confirmLabel: "Reject" });
+  if (!ok) return;
+  const res = await masterApi("rejectApplication", { id }, "POST");
+  toast(res.success ? "Application rejected" : (res.error || "Failed"), res.success ? "success" : "error");
+  loadApplications();
+}
+
+// Change password:
+document.getElementById("changePasswordBtn").addEventListener("click", async () => {
+  const current = document.getElementById("pwCurrent").value;
+  const next = document.getElementById("pwNew").value;
+  const confirmVal = document.getElementById("pwConfirm").value;
+  if (!current && current !== "") { toast("Fill in all password fields", "warning"); return; }
+  if (next !== confirmVal) { toast("New passwords don't match", "error"); return; }
+  const res = await masterApi("changeMasterPassword", { current, next }, "POST");
+  toast(res.success ? "Password updated" : (res.error || "Failed"), res.success ? "success" : "error");
+  if (res.success) {
+    document.getElementById("pwCurrent").value = "";
+    document.getElementById("pwNew").value = "";
+    document.getElementById("pwConfirm").value = "";
+  }
+});
 // ============================================================
 // PROFILE
 // ============================================================
 function initProfile() {
   document.getElementById("profilePhotoUploadBtn").addEventListener("click", () => document.getElementById("profilePhotoUpload").click());
-  document.getElementById("profilePhotoUpload").addEventListener("change", (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      document.getElementById("profilePhotoPreview").innerHTML = `<img src="${reader.result}" alt="Profile photo">`;
-    };
-    reader.readAsDataURL(file);
-  });
+document.getElementById("profilePhotoUpload").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async () => {
+    document.getElementById("profilePhotoPreview").innerHTML = `<img src="${reader.result}" alt="Profile photo">`;
+    const res = await masterApi("saveProfile", { photoUrl: reader.result }, "POST");
+    toast(res.success ? "Photo saved" : "Failed to save photo", res.success ? "success" : "error");
+  };
+  reader.readAsDataURL(file);
+});
 
   document.getElementById("changePasswordBtn").addEventListener("click", async () => {
     const current = document.getElementById("pwCurrent").value;
@@ -1067,3 +1165,19 @@ document.addEventListener("DOMContentLoaded", () => {
   initHeader();
   if (window.lucide) lucide.createIcons();
 });
+async function loadAllData() {
+  await Promise.all([
+    loadStats(), loadEvents(), loadGlobalSettings(), loadPlans(),
+    loadApplications(), loadAuditTrail(), loadMasterDbInfo(), loadProfileData(),
+  ]);
+}
+async function loadProfileData() {
+  const res = await masterApi("getProfile");
+  if (res.success && res.profile) {
+    document.getElementById("profileUsername").value = res.profile.username || "master";
+    if (res.profile.photoUrl) {
+      document.getElementById("profilePhotoPreview").innerHTML = `<img src="${res.profile.photoUrl}" alt="Profile photo">`;
+    }
+  }
+}
+
