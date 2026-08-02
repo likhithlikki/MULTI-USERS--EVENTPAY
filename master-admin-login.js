@@ -550,15 +550,17 @@ async function deactivateEvent(eventId) {
   toast("Event deactivated", "success");
   loadEvents();
 }
+
+
 async function deleteEvent(eventId) {
   const ok = await confirmDialog({
     title: "Delete this event permanently?",
-    message: "This removes the event from the Master Database. Its spreadsheet and Drive folder are not affected.",
+    message: "Removes it from the Master Database. Its spreadsheet and Drive folder are not affected.",
     confirmLabel: "Delete",
   });
   if (!ok) return;
-  // TODO(backend): await masterApi("deleteEvent", { eventId }, "POST");
-  toast("Event deleted", "success");
+  const res = await masterApi("deleteEvent", { eventId }, "POST");
+  toast(res.success ? "Event deleted" : (res.error || "Failed"), res.success ? "success" : "error");
   loadEvents();
 }
 
@@ -1159,12 +1161,9 @@ document.addEventListener("DOMContentLoaded", () => {
   initHeader();
   if (window.lucide) lucide.createIcons();
 });
-async function loadAllData() {
-  await Promise.all([
-    loadStats(), loadEvents(), loadGlobalSettings(), loadPlans(),
-    loadApplications(), loadAuditTrail(), loadMasterDbInfo(), loadProfileData(),
-  ]);
-}
+
+
+  
 async function loadProfileData() {
   const res = await masterApi("getProfile");
   if (res.success && res.profile) {
