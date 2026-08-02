@@ -59,16 +59,27 @@ const APP_CONFIG = {
 //      with zero manual "clear your cache" instructions needed.
 // This does NOT run on every page load forever — only when the stamped
 // version differs, so normal sessions are untouched.
+//
+// FIX (see EventPay Master Admin fix doc, §11): this used to wipe EVERY
+// key starting with "ep_" — including the Master Admin dashboard's own
+// session/theme keys (ep_master_token, ep_master_expiry,
+// ep_master_remember, ep_theme), which share the "ep_" prefix purely by
+// naming convention and have nothing to do with per-event STORAGE_VERSION
+// bumps. That meant bumping STORAGE_VERSION for an unrelated per-event
+// change (new sid format, schema tweak, etc.) would silently force-log-out
+// every active Master Admin session the next time that page loaded.
+// Both wipe loops below now explicitly skip any key starting with
+// "ep_master_" so the two lifecycles stay independent.
 // ============================================================
 (function () {
   try {
     const stamped = localStorage.getItem(APP_CONFIG.LS.STORAGE_VER);
     if (stamped !== APP_CONFIG.STORAGE_VERSION) {
       Object.keys(localStorage)
-        .filter(k => k.indexOf("ep_") === 0)
+        .filter(k => k.indexOf("ep_") === 0 && k.indexOf("ep_master_") !== 0)
         .forEach(k => localStorage.removeItem(k));
       Object.keys(sessionStorage)
-        .filter(k => k.indexOf("ep_") === 0)
+        .filter(k => k.indexOf("ep_") === 0 && k.indexOf("ep_master_") !== 0)
         .forEach(k => sessionStorage.removeItem(k));
       localStorage.setItem(APP_CONFIG.LS.STORAGE_VER, APP_CONFIG.STORAGE_VERSION);
     }
@@ -365,6 +376,14 @@ async function selectEventAndLoad(eid, sid, ename, onStep) {
 //    clicked), getEventSID() is "" and nothing is injected — actions
 //    like getEvents/searchEvent that read the Master DB are unaffected
 //    since the backend only consults sid for per-event actions.
+//
+// NOTE: this shim intentionally does NOT touch requests made by the
+// Master Admin dashboard's own masterApi() helper — that helper builds
+// its own fetch() calls with an explicit `token` parameter and never a
+// per-event `sid`, and it's fine either way since resolveSid_() falls
+// back to DEFAULT_SPREADSHEET_ID when no sid is present, which the
+// Master-Admin-only actions never actually consult (they resolve
+// entirely off the token via requireMasterAuth_()).
 // ============================================================
 (function () {
   const nativeFetch = window.fetch.bind(window);
