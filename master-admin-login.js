@@ -319,13 +319,9 @@ function switchView(viewName) {
 // ============================================================
 async function loadAllData() {
   await Promise.all([
-    loadStats(),
-    loadEvents(),
-    loadGlobalSettings(),
-    loadPlans(),
-    loadApplications(),
-    loadAuditTrail(),
-    loadMasterDbInfo(),
+    loadStats(), loadEvents(), loadGlobalSettings(), loadPlans(),
+    loadApplications(), loadAuditTrail(), loadMasterDbInfo(),
+    loadProfileData(), loadEmailSettings(),
   ]);
 }
 
@@ -839,19 +835,7 @@ function initEmailSettings() {
     // TODO(backend): await masterApi("sendTestEmail", {}, "POST");
     toast("Test email queued", "info");
   });
-  document.getElementById("saveEmailSettingsBtn").addEventListener("click", async () => {
-    const payload = {
-      senderName: document.getElementById("esSenderName").value,
-      replyEmail: document.getElementById("esReplyEmail").value,
-      supportEmail: document.getElementById("esSupportEmail").value,
-      orgEmail: document.getElementById("esOrgEmail").value,
-      footer: document.getElementById("esFooter").value,
-      signature: document.getElementById("esSignature").value,
-    };
-    // TODO(backend): await masterApi("saveEmailSettings", payload, "POST");
-    toast("Email settings saved", "success");
-  });
-}
+
 
 // ============================================================
 // APPLICATIONS
@@ -1012,12 +996,16 @@ async function deactivateEvent(eventId) {
   toast(res.success ? "Event deactivated" : (res.error || "Failed"), res.success ? "success" : "error");
   loadEvents();
 }
-async function deleteEvent(eventId) {
-  const ok = await confirmDialog({ title: "Delete this event permanently?", message: "Removes it from the Master Database.", confirmLabel: "Delete" });
-  if (!ok) return;
-  const res = await masterApi("deleteEvent", { eventId }, "POST");
-  toast(res.success ? "Event deleted" : (res.error || "Failed"), res.success ? "success" : "error");
-  loadEvents();
+
+  
+async function downloadEventBackup(ev) {
+  const res = await masterApi("downloadEventBackup", { eventId: ev.eventId }, "POST");
+  if (res.success && res.url) {
+    window.open(res.url, "_blank", "noopener");
+    toast("Backup ready", "success");
+  } else {
+    toast(res.error || "Backup failed", "error");
+  }
 }
 
 // Global settings save:
@@ -1057,7 +1045,10 @@ document.getElementById("sendTestEmailBtn").addEventListener("click", async () =
   const res = await masterApi("sendTestEmail", {}, "POST");
   toast(res.success ? "Test email sent" : (res.error || "Failed"), res.success ? "success" : "error");
 });
-document.getElementById("saveEmailSettingsBtn").addEventListener("click", async () => {
+
+
+
+  document.getElementById("saveEmailSettingsBtn").addEventListener("click", async () => {
   const payload = {
     senderName: document.getElementById("esSenderName").value,
     replyEmail: document.getElementById("esReplyEmail").value,
@@ -1065,10 +1056,13 @@ document.getElementById("saveEmailSettingsBtn").addEventListener("click", async 
     orgEmail: document.getElementById("esOrgEmail").value,
     footer: document.getElementById("esFooter").value,
     signature: document.getElementById("esSignature").value,
+    logoUrl: window._currentLogoUrl || "",
   };
   const res = await masterApi("saveEmailSettings", payload, "POST");
   toast(res.success ? "Email settings saved" : (res.error || "Failed"), res.success ? "success" : "error");
 });
+
+  
 
 // Approve/reject application:
 async function approveApplication(id) {
@@ -1180,4 +1174,21 @@ async function loadProfileData() {
     }
   }
 }
+
+async function loadEmailSettings() {
+  const res = await masterApi("getEmailSettings");
+  const s = res.settings || {};
+  document.getElementById("esSenderName").value = s.senderName || "";
+  document.getElementById("esReplyEmail").value = s.replyEmail || "";
+  document.getElementById("esSupportEmail").value = s.supportEmail || "";
+  document.getElementById("esOrgEmail").value = s.orgEmail || "";
+  document.getElementById("esFooter").value = s.footer || "";
+  document.getElementById("esSignature").value = s.signature || "";
+  if (s.logoUrl) {
+    document.getElementById("esLogoPreview").innerHTML =
+      `<img src="${s.logoUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`;
+  }
+  window._currentLogoUrl = s.logoUrl || "";
+}
+
 
