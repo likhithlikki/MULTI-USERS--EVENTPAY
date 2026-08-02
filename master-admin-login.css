@@ -2,6 +2,14 @@
    EventPay Master Admin — master-admin_login.css
    Dark theme, purple accent, glassmorphism, rounded cards.
    No frameworks — pure CSS, CSS custom properties for theming.
+
+   THIS REVISION adds (see fix doc):
+   §2 — .status-dot.offline / .status-dot.pending states (previously
+        only .online existed, and nothing ever added it).
+   §9 — .backup-row / .backup-row-info / .backup-row-actions for the
+        new backup-history list.
+   §5 — .app-type-tag for the "Event application" / "Subscription
+        payment" badge on Applications cards.
 ============================================================ */
 
 :root {
@@ -333,8 +341,15 @@ i[data-lucide] { width: 18px; height: 18px; display: inline-block; flex-shrink: 
 }
 .sidebar-footer { padding: 10px 8px; }
 .sidebar-status { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-faint); }
-.status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); }
-.status-dot.online { background: var(--warning); }
+
+/* §2: three real states instead of a single hardcoded label.
+   - pending: neutral amber pulse while a load is in flight
+   - online:  green, backend responded with usable data
+   - offline: red, bootstrap AND fallback both failed */
+.status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); transition: background .25s var(--ease); }
+.status-dot.pending { background: var(--warning); animation: pulse 1.2s ease-in-out infinite; }
+.status-dot.online { background: var(--success); }
+.status-dot.offline { background: var(--danger); }
 .sidebar-scrim { display: none; }
 
 .main { flex: 1; min-width: 0; padding: 20px 20px 60px; }
@@ -530,6 +545,14 @@ i[data-lucide] { width: 18px; height: 18px; display: inline-block; flex-shrink: 
 .application-card-meta { font-size: 12.5px; color: var(--text-dim); display: flex; flex-direction: column; gap: 3px; }
 .application-card-actions { display: flex; gap: 8px; margin-top: 6px; }
 
+/* §5: small tag distinguishing the two merged application sources */
+.app-type-tag {
+  display: inline-block; margin-top: 2px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .02em;
+  color: var(--accent-2); background: rgba(139,92,246,.12);
+  padding: 2px 8px; border-radius: var(--radius-pill); width: fit-content;
+}
+
 /* ---------------- audit timeline ---------------- */
 .timeline { display: flex; flex-direction: column; }
 .timeline-item { display: flex; gap: 14px; padding: 14px 4px; border-bottom: 1px solid var(--border); }
@@ -546,6 +569,16 @@ i[data-lucide] { width: 18px; height: 18px; display: inline-block; flex-shrink: 
 .info-card-label { font-size: 12px; color: var(--text-faint); }
 .info-card-value { font-size: 14px; font-weight: 700; word-break: break-all; }
 .info-card-actions { display: flex; gap: 8px; }
+
+/* §9: backup history list rows */
+.backup-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 4px; border-bottom: 1px solid var(--border); flex-wrap: wrap;
+}
+.backup-row:last-child { border-bottom: none; }
+.backup-row-name { font-size: 13.5px; font-weight: 700; }
+.backup-row-meta { font-size: 12px; color: var(--text-faint); margin-top: 2px; }
+.backup-row-actions { display: flex; gap: 8px; }
 
 /* ---------------- profile ---------------- */
 .profile-card { max-width: 640px; }
