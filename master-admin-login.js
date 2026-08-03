@@ -219,6 +219,31 @@ function toast(msg, type = "info", dur = 3500) {
   }, dur);
 }
 
+function showProgressBar(containerId) {
+  const el = document.getElementById(containerId);
+  if (!el) return null;
+  el.innerHTML = `<div class="progress-bar-track"><div class="progress-bar-fill" id="${containerId}-fill"></div></div>`;
+  const fill = document.getElementById(`${containerId}-fill`);
+  const steps = [[1000, 25], [2000, 59], [2000, 75], [2000, 90]];
+  let elapsed = 0;
+  const timers = [];
+  steps.forEach(([delay, pct]) => {
+    elapsed += delay;
+    timers.push(setTimeout(() => { if (fill && fill.isConnected) fill.style.width = pct + "%"; }, elapsed));
+  });
+  return fill;
+}
+function completeProgressBar(fillEl) {
+  if (!fillEl || !fillEl.isConnected) return;
+  fillEl.style.transition = "width .3s ease";
+  fillEl.style.width = "100%";
+  setTimeout(() => {
+    const track = fillEl.closest(".progress-bar-track");
+    if (track) track.remove();
+  }, 350);
+}
+
+
 function escapeHtml(str) {
   const d = document.createElement("div");
   d.textContent = str ?? "";
@@ -634,13 +659,14 @@ function renderStatSkeletons() {
 }
 
 async function loadStats() {
-  renderStatSkeletons();
+  const fill = showProgressBar("statGrid");
   try {
     const res = await masterApi("getPlatformStats");
     if (!res.success && !res.stats) {
       renderSectionError("statGrid", res.error || "Failed to load stats", loadStats);
       return;
     }
+    completeProgressBar(fill);
     renderStatCards(res.stats || {});
   } catch (e) {
     renderSectionError("statGrid", e.message || "Unexpected error", loadStats);
