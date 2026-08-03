@@ -1177,14 +1177,16 @@ function initEmailSettings() {
     toast(res.success ? "Test email sent" : (res.error || "Failed"), res.success ? "success" : "error");
   });
 
-  document.getElementById("saveEmailSettingsBtn").addEventListener("click", async () => {
+document.getElementById("saveEmailSettingsBtn").addEventListener("click", async () => {
     const payload = {
       senderName: document.getElementById("esSenderName").value,
       replyEmail: document.getElementById("esReplyEmail").value,
+      replyToName: document.getElementById("esReplyToName").value,
       supportEmail: document.getElementById("esSupportEmail").value,
       orgEmail: document.getElementById("esOrgEmail").value,
       footer: document.getElementById("esFooter").value,
       signature: document.getElementById("esSignature").value,
+      bccAdmin: document.getElementById("esBccAdmin").checked,
       logoUrl: window._currentLogoUrl || "",
     };
     const res = await masterApi("saveEmailSettings", payload, "POST");
@@ -1195,10 +1197,12 @@ function initEmailSettings() {
 function applyEmailSettings(s) {
   document.getElementById("esSenderName").value = s.senderName || "";
   document.getElementById("esReplyEmail").value = s.replyEmail || "";
+  document.getElementById("esReplyToName").value = s.replyToName || "";
   document.getElementById("esSupportEmail").value = s.supportEmail || "";
   document.getElementById("esOrgEmail").value = s.orgEmail || "";
   document.getElementById("esFooter").value = s.footer || "";
   document.getElementById("esSignature").value = s.signature || "";
+  document.getElementById("esBccAdmin").checked = !!s.bccAdmin;
   if (s.logoUrl) {
     document.getElementById("esLogoPreview").innerHTML =
       `<img src="${s.logoUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`;
@@ -1235,7 +1239,46 @@ function initApplicationsControls() {
   document.getElementById("applicationsFilter").addEventListener("change", renderApplications);
 }
 
+async function loadNotifications() {
+  const body = document.getElementById("notifPanelBody");
+  if (!body) return;
+  body.innerHTML = `<div style="padding:14px;text-align:center;color:var(--text-faint,#94a3b8);">Loading…</div>`;
+  const res = await masterApi("getRecentNotifications");
+  if (!res || !res.success) {
+    body.innerHTML = `<div style="padding:14px;text-align:center;color:var(--danger);">Failed to load notifications</div>`;
+    return;
+  }
+  updateNotifBadge(res.pendingCount || 0);
+
+  const pendingLine = res.pendingCount > 0
+    ? `<div class="notif-item notif-item-pending">${res.pendingCount} pending application${res.pendingCount === 1 ? "" : "s"} awaiting review</div>`
+    : "";
+  const items = res.notifications || [];
+  const itemsHtml = items.length
+    ? items.map((n) => `
+        <div class="notif-item">
+          <div class="notif-item-action">${escapeHtml(n.action || "Activity")}</div>
+          <div class="notif-item-meta">${escapeHtml(n.user || "master")} &middot; ${fmtDate(n.date)}</div>
+        </div>`).join("")
+    : `<div style="padding:14px;text-align:center;color:var(--text-faint,#94a3b8);">No recent activity</div>`;
+
+  body.innerHTML = pendingLine + itemsHtml;
+}
+
+function updateNotifBadge(count) {
+  const badge = document.getElementById("notifBadge");
+  if (!badge) return;
+  if (count > 0) {
+    badge.textContent = count > 99 ? "99+" : String(count);
+    badge.classList.remove("hidden");
+  } else {
+    badge.classList.add("hidden");
+  }
+}
+
+
 function renderApplications() {
+   updateNotifBadge(state.applications.filter((a) => a.status === "pending").length);
   const q = (document.getElementById("applicationsSearch")?.value || "").trim().toLowerCase();
   const filter = document.getElementById("applicationsFilter")?.value || "";
   const grid = document.getElementById("applicationsGrid");
@@ -1506,17 +1549,19 @@ function initHeader() {
     toast("Refreshing...", "info", 1200);
     loadAllData();
   });
-  document.getElementById("notifBtn").addEventListener("click", () => {
-    // Lightweight version: surface the most recent audit entries plus
-    // the pending-applications count as a toast digest. A full
-    // dropdown panel with read/unread state is a bigger feature — see
-    // fix doc §10 — this covers "show me something real" for now.
-    const pending = state.applications.filter((a) => a.status === "pending").length;
-    const latest = state.auditLog[0];
-    const parts = [];
-    if (pending > 0) parts.push(`${pending} pending application${pending === 1 ? "" : "s"}`);
-    if (latest) parts.push(`Latest: ${latest.action} (${fmtDate(latest.date)})`);
-    toast(parts.length ? parts.join(" · ") : "No new notifications", "info", 5000);
+document.getElementById("notifBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const panel = document.getElementById("notifPanel");
+    const wasHidden = panel.classList.contains("hidden");
+    panel.classList.toggle("hidden");
+    if (wasHidden) loadNotifications();
+  });
+  document.addEventListener("click", (e) => {
+    const panel = document.getElementById("notifPanel");
+    if (!panel || panel.classList.contains("hidden")) return;
+    if (!panel.contains(e.target) && e.target.id !== "notifBtn" && !e.target.closest("#notifBtn")) {
+      panel.classList.add("hidden");
+    }
   });
 }
 
