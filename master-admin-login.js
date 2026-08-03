@@ -588,7 +588,7 @@ async function loadAllDataIndividually() {
     loadApplications, loadAuditTrail, loadMasterDbInfo,
     loadProfileData, loadEmailSettings, loadBackupsList,
   ];
-  const STAGGER_MS = 250;
+  const STAGGER_MS = 80;
 
   const results = await Promise.allSettled(
     loaders.map((fn, i) => wait(i * STAGGER_MS).then(fn))
@@ -688,6 +688,20 @@ function fmtDate(d) {
   if (isNaN(dt)) return String(d);
   return dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
+
+
+function fmtDateTime(date, time) {
+  if (!date) return "—";
+  const dt = new Date(date);
+  const dPart = isNaN(dt) ? String(date) : dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  if (time) return `${dPart}, ${time}`;
+  if (!isNaN(dt) && (dt.getHours() || dt.getMinutes())) {
+    const tPart = dt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+    return `${dPart}, ${tPart}`;
+  }
+  return dPart;
+}
+
 
 // ============================================================
 // EVENTS TABLE
@@ -1386,7 +1400,7 @@ function renderAuditTrail() {
       <div class="timeline-dot"></div>
       <div class="timeline-content">
         <div class="timeline-action">${escapeHtml(r.action)}</div>
-        <div class="timeline-meta">${escapeHtml(r.user || "—")} &middot; ${fmtDate(r.date)} ${escapeHtml(r.time || "")}</div>
+        <div class="timeline-meta">${escapeHtml(r.user || "—")} &middot; ${fmtDateTime(r.date, r.time)}</div>
       </div>
     </div>`).join("");
 }
@@ -1447,7 +1461,7 @@ function renderBackupsList() {
     <div class="backup-row">
       <div class="backup-row-info">
         <div class="backup-row-name">${escapeHtml(b.fileName || "Backup")}</div>
-        <div class="backup-row-meta">${escapeHtml(b.timestamp || "")}</div>
+       <div class="backup-row-meta">${fmtDateTime(b.timestamp)}</div>
       </div>
       <div class="backup-row-actions">
         <button class="btn btn-ghost btn-sm" data-open="${escapeHtml(b.fileId)}"><i data-lucide="external-link"></i>Open</button>
