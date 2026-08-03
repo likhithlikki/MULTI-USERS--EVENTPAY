@@ -76,6 +76,8 @@ body {
 button { font-family: inherit; cursor: pointer; }
 input, select, textarea { font-family: inherit; }
 i[data-lucide] { width: 18px; height: 18px; display: inline-block; flex-shrink: 0; }
+.progress-bar-track { height: 4px; background: var(--surface-strong); border-radius: 999px; overflow: hidden; margin-bottom: 10px; }
+.progress-bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--purple-500), var(--accent-2)); transition: width 1s linear; }
 ::selection { background: var(--purple-500); color: #fff; }
 
 /* ---------------- glass utility ---------------- */
