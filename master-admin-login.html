@@ -173,11 +173,16 @@
           <!-- Populated by renderStatCards() in JS. Skeletons shown until then. -->
         </div>
 
-        <div class="card glass empty-card">
-          <i data-lucide="activity"></i>
-          <h3>Recent activity will appear here</h3>
-          <p>Once connected to the backend, the latest event creations, applications and payments will stream into this panel.</p>
+       <div class="card glass" id="recentActivityCard">
+          <div id="recentActivityList">
+            <div class="empty-card">
+              <i data-lucide="activity"></i>
+              <h3>Recent activity will appear here</h3>
+              <p>Once connected to the backend, the latest event creations, applications and payments will stream into this panel.</p>
+            </div>
+          </div>
         </div>
+           
       </section>
 
       <!-- ================= EVENTS VIEW ================= -->
