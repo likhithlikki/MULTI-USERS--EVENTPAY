@@ -1365,7 +1365,7 @@ function renderAuditTrail() {
   const emptyState = document.getElementById("auditEmptyState");
 
   const rows = state.auditLog.filter((r) => {
-    const matchesQuery = !q || [r.user, r.action, r.ip].some((f) => (f || "").toLowerCase().includes(q));
+    const matchesQuery = !q || [r.user, r.action].some((f) => (f || "").toLowerCase().includes(q));
     const matchesFilter = !filter || r.action === filter;
     return matchesQuery && matchesFilter;
   });
@@ -1377,16 +1377,19 @@ function renderAuditTrail() {
   }
   emptyState.classList.add("hidden");
 
+  // §6.3: Apps Script web apps cannot see caller IPs without a proxy
+  // in front of them — the "IP" field was always empty/misleading, so
+  // it's been dropped from the display entirely rather than shown as
+  // a blank or fake value.
   timeline.innerHTML = rows.map((r) => `
     <div class="timeline-item">
       <div class="timeline-dot"></div>
       <div class="timeline-content">
         <div class="timeline-action">${escapeHtml(r.action)}</div>
-        <div class="timeline-meta">${escapeHtml(r.user || "—")} &middot; ${fmtDate(r.date)} ${escapeHtml(r.time || "")} &middot; ${escapeHtml(r.ip || "—")}</div>
+        <div class="timeline-meta">${escapeHtml(r.user || "—")} &middot; ${fmtDate(r.date)} ${escapeHtml(r.time || "")}</div>
       </div>
     </div>`).join("");
 }
-
 // ============================================================
 // MASTER DATABASE (§9 — real backup list + fixed Restore)
 // ============================================================
