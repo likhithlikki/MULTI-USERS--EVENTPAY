@@ -109,12 +109,13 @@ const EP = APP_CONFIG;
 async function api(a, b, c, d) {
   let action, params, method;
   if (typeof b === "string") {
-    // legacy shape: api(url, action, params, method) — url ignored
     action = b; params = c || {}; method = d || "GET";
   } else {
-    // new shape: api(action, params, method)
     action = a; params = b || {}; method = c || "GET";
   }
+
+  const timerLabel = `[api] ${action} (${method})`;
+  console.time(timerLabel);
 
   try {
     if (method === "GET") {
@@ -122,41 +123,38 @@ async function api(a, b, c, d) {
       u.searchParams.set("action", action);
       Object.entries(params).forEach(([k, v]) => u.searchParams.set(k, String(v)));
 
+      console.log("API URL:", u.toString());
+      const fetchStart = performance.now();
+      const r = await fetch(u.toString());
+      console.log(`[api] ${action} — fetch() resolved after ${(performance.now() - fetchStart).toFixed(0)}ms, status ${r.status}, redirected=${r.redirected}, final URL=${r.url}`);
 
-console.log("API URL:", u.toString());
-
-const r = await fetch(u.toString());
-
-
-      return r.json();
+      const parseStart = performance.now();
+      const json = await r.json();
+      console.log(`[api] ${action} — JSON parse took ${(performance.now() - parseStart).toFixed(0)}ms`);
+      return json;
     } else {
       const body = new URLSearchParams({ action, ...params });
       console.log("POST URL:", APP_CONFIG.SCRIPT_URL);
       console.log("POST BODY:", body.toString());
- const r = await fetch(APP_CONFIG.SCRIPT_URL, {
-    method: "POST",
-    body
-});
 
-console.log("POST STATUS =", r.status);
-console.log("POST OK =", r.ok);
+      const fetchStart = performance.now();
+      const r = await fetch(APP_CONFIG.SCRIPT_URL, { method: "POST", body });
+      console.log(`[api] ${action} — fetch() resolved after ${(performance.now() - fetchStart).toFixed(0)}ms, status ${r.status}, redirected=${r.redirected}, final URL=${r.url}`);
 
-const txt = await r.text();
+      const txt = await r.text();
+      console.log("POST RESPONSE =", txt);
 
-console.log("POST RESPONSE =", txt);
-
-try {
-    return JSON.parse(txt);
-} catch (e) {
-    return {
-        success: false,
-        error: "Invalid JSON",
-        raw: txt
-    };
-}
+      try {
+        return JSON.parse(txt);
+      } catch (e) {
+        return { success: false, error: "Invalid JSON", raw: txt };
+      }
     }
   } catch (e) {
+    console.log(`[api] ${action} — threw:`, e.message);
     return { error: e.message };
+  } finally {
+    console.timeEnd(timerLabel);
   }
 }
 
