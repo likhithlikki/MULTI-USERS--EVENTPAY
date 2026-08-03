@@ -76,9 +76,7 @@ body {
 button { font-family: inherit; cursor: pointer; }
 input, select, textarea { font-family: inherit; }
 i[data-lucide] { width: 18px; height: 18px; display: inline-block; flex-shrink: 0; }
-.progress-bar-track { height: 4px; background: var(--surface-strong); border-radius: 999px; overflow: hidden; margin-bottom: 10px; }
-.progress-bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--purple-500), var(--accent-2)); transition: width 1s linear; }
-::selection { background: var(--purple-500); color: #fff; }
+
 
 /* ---------------- glass utility ---------------- */
 .glass {
@@ -654,3 +652,23 @@ i[data-lucide] { width: 18px; height: 18px; display: inline-block; flex-shrink: 
 .notif-item-meta { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
 .notif-item-pending { color: var(--warning); font-weight: 700; font-size: 12.5px; }
 
+
+.loader {
+  width: 120px;
+  height: 22px;
+  border-radius: 20px;
+  color: var(--accent-2);
+  border: 2px solid var(--accent);
+  position: relative;
+  margin: 0 auto 10px;
+}
+.loader::before {
+  content: "";
+  position: absolute;
+  margin: 2px;
+  inset: 0 100% 0 0;
+  border-radius: inherit;
+  background: currentColor;
+  transition: inset .8s ease;
+}
+.loader-wrap { display: flex; align-items: center; justify-content: center; padding: 24px 0; }
