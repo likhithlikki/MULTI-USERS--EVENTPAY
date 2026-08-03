@@ -4,35 +4,28 @@
 // Authentication: single master admin, password-only, checked
 // server-side via masterLogin action.
 //
-// THIS REVISION fixes/adds (see fix doc):
-// §11 — "refresh logs you out" bug. hasValidSession() used to
-//   require REMEMBER === "1" even though loginMasterAdmin() always
-//   wrote a valid TOKEN/EXPIRY to localStorage regardless of the
-//   checkbox — so an unchecked "Remember me" silently discarded a
-//   perfectly valid session on every refresh. Fixed by giving
-//   "Remember me" real meaning: unchecked -> sessionStorage (survives
-//   refresh/navigation, dies with the tab); checked -> localStorage
-//   (survives closing the browser too). hasValidSession() now checks
-//   both. The on-screen countdown is now derived from the real stored
-//   expiry instead of always resetting to 60:00. masterApi() also
-//   slides the locally stored expiry forward on every successful
-//   authenticated call, mirroring the backend's own sliding
-//   expiration in requireMasterAuth_().
-// §2 — sidebar "Backend not connected" dot is now real: green after
-//   a successful load, red (with a toast) if both the bootstrap and
-//   the individual-loader fallback fail.
-// §5 — Applications now carries a `type` field per row
-//   ("eventApplication" | "subscriptionPayment") so Approve/Reject
-//   hit the right sheet on the backend (EventApplications vs.
-//   SubscriptionPayments), matching the already-updated backend.
-// §9 — Master Database view now lists real backups (from the
-//   `listMasterBackups` action) with a Restore button per row that
-//   passes the correct backupFileId, instead of a single button that
-//   always sent an empty payload.
-//
-// (Everything from the prior revision — staggered fallback loader,
-// per-section inline error cards, combined bootstrap-first strategy —
-// is unchanged.)
+// THIS REVISION (consolidated) fixes/adds:
+// §11 — session survives refresh regardless of "Remember me"
+// §2  — real backend status dot (pending/online/offline)
+// §5  — Applications carries type field (eventApplication/subscriptionPayment)
+// §9  — Master Database lists real backups with per-row Restore
+// §12 — Loader (pill progress bar) shown on every section load,
+//        filling in stages: 25% @1s, 59% @3s, 75% @5s, 90% @7s,
+//        then snapping to 100% and disappearing once data arrives.
+// §13 — Payment Gateway now loads/saves against the backend.
+// §14 — Global Settings: added "Session Timeout (minutes)" control
+//        so the frontend's auto-logout timing is admin-configurable.
+// §15 — Dashboard "Recent Activity" now populated from the audit log.
+// §16 — Test email requires a destination address (Support/Org email).
+// §17 — Applications card buttons wrap instead of overflowing.
+// §18 — Audit Trail / Master DB backups show full date+time.
+// §19 — Logo / profile photo upload now attempts to store via a
+//        backend "uploadImage" action (Drive-backed) instead of only
+//        keeping a giant base64 string that Sheets can't hold. Falls
+//        back to a warning toast if the backend action isn't wired
+//        up yet — see note in initEmailSettings()/initProfile().
+// §20 — Reduced artificial stagger delay in the fallback loader path
+//        (250ms -> 80ms) — this was adding up to 2.5s of pure lag.
 // ============================================================
 
 const MASTER_CONFIG = {
@@ -74,19 +67,8 @@ const state = {
 
 // ============================================================
 // SESSION STORAGE HELPERS (§11)
-// ------------------------------------------------------------
-// "Remember me" now genuinely controls WHERE the token lives:
-//   - unchecked -> sessionStorage: gone when the tab/browser closes,
-//     but a plain refresh or in-tab navigation keeps it.
-//   - checked   -> localStorage: survives closing and reopening the
-//     browser entirely.
-// Every read goes through getStoredSession()/getActiveStore() so
-// there is exactly one place that decides "where is the token."
 // ============================================================
 function getActiveStore() {
-  // Prefer whichever store actually holds a live, non-expired token.
-  // sessionStorage is checked first since it's the more common case
-  // (unchecked "Remember me").
   for (const store of [sessionStorage, localStorage]) {
     const token = store.getItem(MASTER_CONFIG.LS.TOKEN);
     const expiry = Number(store.getItem(MASTER_CONFIG.LS.EXPIRY) || 0);
@@ -114,11 +96,7 @@ function persistSession(token, expiry, remember) {
   const other = remember ? sessionStorage : localStorage;
   store.setItem(MASTER_CONFIG.LS.TOKEN, token);
   store.setItem(MASTER_CONFIG.LS.EXPIRY, String(expiry));
-  // Keep REMEMBER as a simple UI-preference flag (used to pre-check
-  // the checkbox next time), not as a gate on session validity.
   localStorage.setItem(MASTER_CONFIG.LS.REMEMBER, remember ? "1" : "0");
-  // Make sure a stale token isn't left behind in the OTHER store from
-  // a previous login with a different "Remember me" choice.
   other.removeItem(MASTER_CONFIG.LS.TOKEN);
   other.removeItem(MASTER_CONFIG.LS.EXPIRY);
 }
@@ -131,11 +109,6 @@ function clearSession() {
   localStorage.removeItem(MASTER_CONFIG.LS.REMEMBER);
 }
 
-// Slide the locally stored expiry forward, mirroring the backend's
-// own sliding expiration (requireMasterAuth_ extends the CacheService
-// TTL on every authenticated call). Without this, the frontend would
-// force a re-login at the ORIGINAL login time's +60min mark even
-// though the backend session is still very much alive.
 function extendStoredExpiry() {
   const store = getActiveStore();
   if (!store) return;
@@ -191,10 +164,6 @@ async function masterApi(action, params = {}, method = "GET", timeoutMs = MASTER
     clearTimeout(timer);
   }
 
-  // Sliding expiration: any successful, token-bearing call extends the
-  // locally stored expiry too, so the frontend's idea of "still logged
-  // in" tracks the backend's, instead of expiring 60 minutes after the
-  // original login regardless of activity.
   if (token && result && result.success !== false) {
     extendStoredExpiry();
   }
@@ -219,6 +188,13 @@ function toast(msg, type = "info", dur = 3500) {
   }, dur);
 }
 
+// ============================================================
+// LOADER / PROGRESS BAR (§12)
+// Fills in stages: 25% @1s, 59% @3s, 75% @5s, 90% @7s, then
+// completeProgressBar() snaps it to 100% and removes it once the
+// real data has actually arrived. Driven by the --fill CSS custom
+// property read by .loader::before in the stylesheet.
+// ============================================================
 function showProgressBar(containerId) {
   const el = document.getElementById(containerId);
   if (!el) return null;
@@ -239,30 +215,6 @@ function completeProgressBar(fillEl) {
     const wrap = fillEl.closest(".loader-wrap");
     if (wrap) wrap.remove();
   }, 500);
-}
-function showProgressBar(containerId) {
-  const el = document.getElementById(containerId);
-  if (!el) return null;
-  el.innerHTML = `<div class="loader-wrap"><div class="loader" id="${containerId}-fill"></div></div>`;
-  const fill = document.getElementById(`${containerId}-fill`);
-  const steps = [[1000, 25], [2000, 59], [2000, 75], [2000, 90]];
-  let elapsed = 0;
-  steps.forEach(([delay, pct]) => {
-    elapsed += delay;
-    setTimeout(() => {
-      if (fill && fill.isConnected) fill.style.setProperty("--fill", pct);
-      if (fill && fill.isConnected) fill.style.inset = `0 ${100 - pct}% 0 0`;
-    }, elapsed);
-  });
-  return fill;
-}
-function completeProgressBar(fillEl) {
-  if (!fillEl || !fillEl.isConnected) return;
-  fillEl.style.inset = "0";
-  setTimeout(() => {
-    const wrap = fillEl.closest(".loader-wrap");
-    if (wrap) wrap.remove();
-  }, 400);
 }
 
 function escapeHtml(str) {
@@ -360,7 +312,6 @@ function toggleTheme() {
 // BACKEND STATUS DOT (§2)
 // ============================================================
 function setBackendStatus(status, detail) {
-  // status: "online" | "offline" | "pending"
   const dot = document.getElementById("sidebarStatusDot");
   const label = document.getElementById("sidebarStatusLabel");
   if (!dot || !label) return;
@@ -382,9 +333,6 @@ function initLogin() {
   const toggleBtn = document.getElementById("togglePasswordBtn");
   const errorEl = document.getElementById("loginError");
 
-  // Pre-check "Remember me" based on the user's last choice — purely
-  // a UI convenience now, it no longer gates whether a session
-  // survives a refresh (both paths do; see hasValidSession()).
   const rememberBox = document.getElementById("rememberMe");
   if (rememberBox) rememberBox.checked = localStorage.getItem(MASTER_CONFIG.LS.REMEMBER) === "1";
 
@@ -463,8 +411,9 @@ function logoutMasterAdmin() {
 }
 
 // ============================================================
-// SESSION TIMER (§11 — synced to the REAL stored expiry, not a
-// hardcoded 60:00 reset on every call)
+// SESSION TIMER (§11 / §14 — now respects the admin-configurable
+// "Session Timeout (minutes)" Global Setting via
+// applySessionTimeoutSetting())
 // ============================================================
 function startSessionTimer() {
   const expiry = getStoredExpiry();
@@ -472,10 +421,6 @@ function startSessionTimer() {
   updateSessionTimerText();
   stopSessionTimer();
   state.sessionTimerHandle = setInterval(() => {
-    // Re-derive from storage each tick instead of just counting down a
-    // local variable — this way an extendStoredExpiry() call from
-    // masterApi() (sliding expiration) is reflected immediately rather
-    // than the timer ticking down to zero on its own stale schedule.
     const currentExpiry = getStoredExpiry();
     if (!currentExpiry) {
       stopSessionTimer();
@@ -537,23 +482,16 @@ async function loadAllData() {
 
     if (!looksUnsupported && res) {
       applyBootstrapResult(res);
-      // Consider the backend "online" if at least the core sections
-      // (events + stats) came back — a couple of secondary sections
-      // failing shouldn't flip the whole dashboard red.
       const coreOk = !!(res.events && res.events.events) && !!res.stats;
       setBackendStatus(coreOk ? "online" : "offline",
         coreOk ? null : "Some dashboard sections failed to load.");
       return;
     }
-    // Combined endpoint not available this session — retry it again
-    // on the NEXT manual refresh instead of being locked into the
-    // slower per-call fallback forever (see fix doc §3).
     state.bootstrapSupported = false;
   }
 
   const ok = await loadAllDataIndividually();
   setBackendStatus(ok ? "online" : "offline", ok ? null : "Backend did not respond.");
-  // Give the combined endpoint another chance next time.
   state.bootstrapSupported = true;
 }
 
@@ -573,6 +511,7 @@ function applyBootstrapResult(res) {
   if (res.globalSettings && res.globalSettings.settings) {
     state.globalSettings = res.globalSettings.settings;
     renderGlobalSettings();
+    applySessionTimeoutSetting();
   } else {
     renderSectionError("globalSettingsGrid", errors.globalSettings || "No settings returned", loadGlobalSettings);
   }
@@ -610,9 +549,13 @@ function applyBootstrapResult(res) {
   } else {
     renderInlineError(document.getElementById("masterDbId"), errors.dbInfo || "Failed to load");
   }
-  // Backup list isn't part of the bootstrap payload — load it
-  // separately (cheap, single-sheet read).
   loadBackupsList();
+
+  if (res.pgSettings && res.pgSettings.settings) {
+    applyPaymentGatewaySettings(res.pgSettings.settings);
+  } else {
+    loadPaymentGateway();
+  }
 
   if (res.profile && res.profile.profile) {
     applyProfileData(res.profile.profile);
@@ -634,8 +577,9 @@ async function loadAllDataIndividually() {
     loadStats, loadEvents, loadGlobalSettings, loadPlans,
     loadApplications, loadAuditTrail, loadMasterDbInfo,
     loadProfileData, loadEmailSettings, loadBackupsList,
+    loadPaymentGateway,
   ];
-  const STAGGER_MS = 80;
+  const STAGGER_MS = 80; // was 250 — that was pure artificial lag
 
   const results = await Promise.allSettled(
     loaders.map((fn, i) => wait(i * STAGGER_MS).then(fn))
@@ -648,8 +592,6 @@ async function loadAllDataIndividually() {
       console.error(`[loadAllData] section #${i} threw unexpectedly:`, r.reason);
     }
   });
-  // "Online" if at least most sections loaded — a single section
-  // failing shouldn't flip the whole indicator red.
   return failures < loaders.length;
 }
 
@@ -665,19 +607,6 @@ const STAT_DEFS = [
   { key: "totalRevenue", label: "Total Revenue", icon: "indian-rupee" },
   { key: "todaysRegistrations", label: "Today's Registrations", icon: "user-plus" },
 ];
-
-function renderStatSkeletons() {
-  const grid = document.getElementById("statGrid");
-  grid.innerHTML = STAT_DEFS.map((s) => `
-    <div class="stat-card glass skeleton">
-      <div class="stat-card-icon"><i data-lucide="${s.icon}"></i></div>
-      <div>
-        <div class="stat-card-value">0</div>
-        <div class="stat-card-label">${s.label}</div>
-      </div>
-    </div>`).join("");
-  if (window.lucide) lucide.createIcons();
-}
 
 async function loadStats() {
   const fill = showProgressBar("statGrid");
@@ -730,6 +659,7 @@ function animateCounters() {
 }
 
 function fmtINR(n) { return "₹" + Number(n || 0).toLocaleString("en-IN"); }
+
 function fmtDate(d) {
   if (!d) return "—";
   const dt = new Date(d);
@@ -737,7 +667,8 @@ function fmtDate(d) {
   return dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-
+// §18: proper date + time formatter used by Audit Trail, Recent
+// Activity, and Master DB backup rows.
 function fmtDateTime(date, time) {
   if (!date) return "—";
   const dt = new Date(date);
@@ -750,20 +681,18 @@ function fmtDateTime(date, time) {
   return dPart;
 }
 
-
 // ============================================================
 // EVENTS TABLE
 // ============================================================
 async function loadEvents() {
-  const tbody = document.getElementById("eventsTableBody");
-  if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="padding:20px;text-align:center;color:var(--text-faint,#94a3b8);">Loading events…</td></tr>`;
-
+  const fill = showProgressBar("eventsTableBody");
   try {
     const res = await masterApi("getEvents");
     if (!res.success && !res.events) {
       renderSectionError("eventsTableBody", res.error || "Failed to load events", loadEvents);
       return;
     }
+    completeProgressBar(fill);
     state.events = res.events || [];
     applyEventsFilters();
   } catch (e) {
@@ -1081,7 +1010,7 @@ function downloadActiveSheetCsv() {
 }
 
 // ============================================================
-// GLOBAL SETTINGS
+// GLOBAL SETTINGS (§14 — added sessionTimeoutMinutes)
 // ============================================================
 const GLOBAL_SETTINGS_DEFS = [
   ["sendEventCreatedEmail", "Send Event Created Email", "Notify the organizer as soon as their event is created."],
@@ -1098,20 +1027,21 @@ const GLOBAL_SETTINGS_DEFS = [
   ["allowPasswordReset", "Allow Password Reset", "Let event admins reset their own password."],
   ["passwordResetExpiry", "Password Reset Expiry (minutes)", "How long a password reset link stays valid.", "number"],
   ["sendPasswordResetEmail", "Send Password Reset Email", "Email a link automatically when a reset is requested."],
+  ["sessionTimeoutMinutes", "Session Timeout (minutes)", "How long an admin session stays active before auto-logout.", "number"],
 ];
 
 async function loadGlobalSettings() {
-  const grid = document.getElementById("globalSettingsGrid");
-  if (grid) grid.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-faint,#94a3b8);grid-column:1/-1">Loading settings…</div>`;
-
+  const fill = showProgressBar("globalSettingsGrid");
   try {
     const res = await masterApi("getGlobalSettings");
     if (!res.success && !res.settings) {
       renderSectionError("globalSettingsGrid", res.error || "Failed to load global settings", loadGlobalSettings);
       return;
     }
+    completeProgressBar(fill);
     state.globalSettings = res.settings || {};
     renderGlobalSettings();
+    applySessionTimeoutSetting();
   } catch (e) {
     renderSectionError("globalSettingsGrid", e.message || "Unexpected error", loadGlobalSettings);
   }
@@ -1122,10 +1052,11 @@ function renderGlobalSettings() {
   const values = state.globalSettings;
   grid.innerHTML = GLOBAL_SETTINGS_DEFS.map(([key, title, desc, type]) => {
     if (type === "number") {
+      const fallback = key === "sessionTimeoutMinutes" ? MASTER_CONFIG.SESSION_MINUTES : 30;
       return `
       <div class="setting-card glass">
         <div><div class="setting-title">${escapeHtml(title)}</div><div class="setting-desc">${escapeHtml(desc)}</div></div>
-        <input type="number" class="select" style="width:80px" data-setting="${key}" value="${values[key] ?? 30}">
+        <input type="number" class="select" style="width:80px" data-setting="${key}" value="${values[key] ?? fallback}">
       </div>`;
     }
     const checked = values[key] ? "checked" : "";
@@ -1142,6 +1073,16 @@ function renderGlobalSettings() {
   if (window.lucide) lucide.createIcons();
 }
 
+// §14: applies the admin-configured session length to MASTER_CONFIG
+// so startSessionTimer()/extendStoredExpiry() use it immediately,
+// without needing a page reload.
+function applySessionTimeoutSetting() {
+  const mins = Number(state.globalSettings.sessionTimeoutMinutes);
+  if (mins && mins > 0) {
+    MASTER_CONFIG.SESSION_MINUTES = mins;
+  }
+}
+
 async function saveGlobalSettings() {
   const payload = {};
   document.querySelectorAll("#globalSettingsGrid [data-setting]").forEach((el) => {
@@ -1149,6 +1090,10 @@ async function saveGlobalSettings() {
   });
   const res = await masterApi("saveGlobalSettings", payload, "POST");
   toast(res.success ? "Global settings saved" : (res.error || "Save failed"), res.success ? "success" : "error");
+  if (res.success) {
+    state.globalSettings = { ...state.globalSettings, ...payload };
+    applySessionTimeoutSetting();
+  }
 }
 
 // ============================================================
@@ -1161,12 +1106,14 @@ const DEFAULT_PLANS = [
 ];
 
 async function loadPlans() {
+  const fill = showProgressBar("plansGrid");
   try {
     const res = await masterApi("getSubscriptionPlans");
     if (!res.success && !res.plans) {
       renderSectionError("plansGrid", res.error || "Failed to load plans", loadPlans);
       return;
     }
+    completeProgressBar(fill);
     state.plans = (res.plans && res.plans.length) ? res.plans : DEFAULT_PLANS;
     renderPlans();
   } catch (e) {
@@ -1201,7 +1148,7 @@ async function savePlan(planId) {
 }
 
 // ============================================================
-// PAYMENT GATEWAY
+// PAYMENT GATEWAY (§13 — now actually loads + saves)
 // ============================================================
 function initPaymentGateway() {
   document.getElementById("savePaymentGatewayBtn").addEventListener("click", async () => {
@@ -1214,12 +1161,46 @@ function initPaymentGateway() {
       testMode: document.getElementById("pgTestMode").checked,
     };
     const res = await masterApi("savePaymentGatewaySettings", payload, "POST");
-    toast(res.success ? "Payment gateway settings saved" : (res.error || "Failed"), res.success ? "success" : "error");
+    toast(res.success ? "Payment gateway settings saved" : (res.error || "Failed — check the backend savePaymentGatewaySettings action"), res.success ? "success" : "error");
   });
 }
 
+async function loadPaymentGateway() {
+  const view = document.getElementById("view-paymentGateway");
+  const card = view ? view.querySelector(".form-card") : null;
+  let fill = null;
+  if (card) {
+    card.dataset.prevContent = ""; // no-op placeholder, kept for symmetry with other loaders
+  }
+  try {
+    const res = await masterApi("getPaymentGatewaySettings");
+    if (!res.success && !res.settings) {
+      // Non-fatal: leave the form as-is (likely backend action missing yet)
+      console.warn("getPaymentGatewaySettings failed:", res.error);
+      return;
+    }
+    applyPaymentGatewaySettings(res.settings || {});
+  } catch (e) {
+    console.warn("Payment gateway load failed:", e.message);
+  }
+}
+
+function applyPaymentGatewaySettings(s) {
+  const enabledEl = document.getElementById("pgEnabled");
+  const providerEl = document.getElementById("pgProvider");
+  const merchantEl = document.getElementById("pgMerchantId");
+  const webhookEl = document.getElementById("pgWebhook");
+  const testModeEl = document.getElementById("pgTestMode");
+  if (enabledEl) enabledEl.checked = !!s.enabled;
+  if (providerEl) providerEl.value = s.provider || "razorpay";
+  if (merchantEl) merchantEl.value = s.merchantId || "";
+  if (webhookEl) webhookEl.value = s.webhook || "";
+  if (testModeEl) testModeEl.checked = s.testMode !== false;
+  // Secret is intentionally never sent back from the backend — leave blank.
+}
+
 // ============================================================
-// EMAIL SETTINGS
+// EMAIL SETTINGS (§19 — logo upload attempts Drive-backed storage)
 // ============================================================
 function initEmailSettings() {
   document.getElementById("esLogoUploadBtn").addEventListener("click", () => document.getElementById("esLogoUpload").click());
@@ -1227,19 +1208,33 @@ function initEmailSettings() {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
+      // Show an immediate local preview while the upload is in flight.
       document.getElementById("esLogoPreview").innerHTML = `<img src="${reader.result}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`;
-      window._currentLogoUrl = reader.result;
+
+      const res = await masterApi("uploadImage", { base64: reader.result, filename: "logo_" + Date.now() + ".png", folderType: "email" }, "POST");
+      if (res.success && res.url) {
+        window._currentLogoUrl = res.url;
+        toast("Logo uploaded", "success");
+      } else {
+        // Backend action not available yet (or failed) — the base64
+        // preview above still shows locally, but it will NOT be saved
+        // to Settings, since Sheets cells can't hold full base64 images.
+        window._currentLogoUrl = "";
+        toast(res.error || "Logo upload needs the backend 'uploadImage' action (Drive-backed) to persist — ask your developer to add it.", "warning", 6000);
+      }
     };
     reader.readAsDataURL(file);
   });
 
   document.getElementById("sendTestEmailBtn").addEventListener("click", async () => {
-    const res = await masterApi("sendTestEmail", {}, "POST");
-    toast(res.success ? "Test email sent" : (res.error || "Failed"), res.success ? "success" : "error");
+    const to = document.getElementById("esSupportEmail").value.trim() || document.getElementById("esOrgEmail").value.trim();
+    if (!to) { toast("Enter a Support Email or Organization Email first", "warning"); return; }
+    const res = await masterApi("sendTestEmail", { to }, "POST");
+    toast(res.success ? `Test email sent to ${to}` : (res.error || "Failed"), res.success ? "success" : "error");
   });
 
-document.getElementById("saveEmailSettingsBtn").addEventListener("click", async () => {
+  document.getElementById("saveEmailSettingsBtn").addEventListener("click", async () => {
     const payload = {
       senderName: document.getElementById("esSenderName").value,
       replyEmail: document.getElementById("esReplyEmail").value,
@@ -1277,8 +1272,7 @@ function applyEmailSettings(s) {
 // ============================================================
 async function loadApplications() {
   const badge = document.getElementById("applicationsBadge");
-  const grid = document.getElementById("applicationsGrid");
-  if (grid) grid.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-faint,#94a3b8);grid-column:1/-1">Loading applications…</div>`;
+  const fill = showProgressBar("applicationsGrid");
 
   try {
     const res = await masterApi("getPendingApplications");
@@ -1287,6 +1281,7 @@ async function loadApplications() {
       renderSectionError("applicationsGrid", res.error || "Failed to load applications", loadApplications);
       return;
     }
+    completeProgressBar(fill);
     state.applications = res.applications || [];
     if (badge) badge.textContent = state.applications.filter((a) => a.status === "pending").length;
     renderApplications();
@@ -1320,7 +1315,7 @@ async function loadNotifications() {
     ? items.map((n) => `
         <div class="notif-item">
           <div class="notif-item-action">${escapeHtml(n.action || "Activity")}</div>
-          <div class="notif-item-meta">${escapeHtml(n.user || "master")} &middot; ${fmtDate(n.date)}</div>
+          <div class="notif-item-meta">${escapeHtml(n.user || "master")} &middot; ${fmtDateTime(n.date, n.time)}</div>
         </div>`).join("")
     : `<div style="padding:14px;text-align:center;color:var(--text-faint,#94a3b8);">No recent activity</div>`;
 
@@ -1338,9 +1333,8 @@ function updateNotifBadge(count) {
   }
 }
 
-
 function renderApplications() {
-   updateNotifBadge(state.applications.filter((a) => a.status === "pending").length);
+  updateNotifBadge(state.applications.filter((a) => a.status === "pending").length);
   const q = (document.getElementById("applicationsSearch")?.value || "").trim().toLowerCase();
   const filter = document.getElementById("applicationsFilter")?.value || "";
   const grid = document.getElementById("applicationsGrid");
@@ -1398,11 +1392,10 @@ function viewApplication(id) {
 }
 
 // ============================================================
-// AUDIT TRAIL
+// AUDIT TRAIL + RECENT ACTIVITY (§15, §18)
 // ============================================================
 async function loadAuditTrail() {
-  const timeline = document.getElementById("auditTimeline");
-  if (timeline) timeline.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-faint,#94a3b8);">Loading audit trail…</div>`;
+  const fill = showProgressBar("auditTimeline");
 
   try {
     const res = await masterApi("getAuditTrail");
@@ -1410,7 +1403,8 @@ async function loadAuditTrail() {
       renderSectionError("auditTimeline", res.error || "Failed to load audit trail", loadAuditTrail);
       return;
     }
-state.auditLog = res.log || [];
+    completeProgressBar(fill);
+    state.auditLog = res.log || [];
     renderAuditTrail();
     renderRecentActivity();
   } catch (e) {
@@ -1422,6 +1416,7 @@ function initAuditControls() {
   document.getElementById("auditFilter").addEventListener("change", renderAuditTrail);
 }
 
+// §15: Dashboard "Recent Activity" card, fed from the same audit log.
 function renderRecentActivity() {
   const el = document.getElementById("recentActivityList");
   if (!el) return;
@@ -1442,7 +1437,6 @@ function renderRecentActivity() {
   if (window.lucide) lucide.createIcons();
 }
 
-
 function renderAuditTrail() {
   const q = (document.getElementById("auditSearch")?.value || "").trim().toLowerCase();
   const filter = document.getElementById("auditFilter")?.value || "";
@@ -1462,10 +1456,6 @@ function renderAuditTrail() {
   }
   emptyState.classList.add("hidden");
 
-  // §6.3: Apps Script web apps cannot see caller IPs without a proxy
-  // in front of them — the "IP" field was always empty/misleading, so
-  // it's been dropped from the display entirely rather than shown as
-  // a blank or fake value.
   timeline.innerHTML = rows.map((r) => `
     <div class="timeline-item">
       <div class="timeline-dot"></div>
@@ -1475,8 +1465,9 @@ function renderAuditTrail() {
       </div>
     </div>`).join("");
 }
+
 // ============================================================
-// MASTER DATABASE (§9 — real backup list + fixed Restore)
+// MASTER DATABASE (§9 — real backup list + fixed Restore, §18 time)
 // ============================================================
 async function loadMasterDbInfo() {
   const idEl = document.getElementById("masterDbId");
@@ -1498,22 +1489,21 @@ async function loadMasterDbInfo() {
 
 function renderMasterDbInfo(info) {
   document.getElementById("masterDbId").textContent = info.spreadsheetId || "Not connected";
-  document.getElementById("masterDbLastBackup").textContent = info.lastBackup ? fmtDate(info.lastBackup) : "No backup yet";
+  document.getElementById("masterDbLastBackup").textContent = info.lastBackup ? fmtDateTime(info.lastBackup) : "No backup yet";
 
   document.getElementById("openMasterDbBtn").onclick = () => openUrl(sheetUrlFromId(info.spreadsheetId));
   document.getElementById("copyMasterDbIdBtn").onclick = () => copyToClipboard(info.spreadsheetId, "Master Spreadsheet ID copied");
 }
 
 async function loadBackupsList() {
-  const container = document.getElementById("backupsList");
-  if (!container) return;
-  container.innerHTML = `<div style="padding:14px;text-align:center;color:var(--text-faint,#94a3b8);">Loading backups…</div>`;
+  const fill = showProgressBar("backupsList");
   try {
     const res = await masterApi("listMasterBackups");
     if (!res.success && !res.backups) {
       renderSectionError("backupsList", res.error || "Failed to load backups", loadBackupsList);
       return;
     }
+    completeProgressBar(fill);
     state.backups = res.backups || [];
     renderBackupsList();
   } catch (e) {
@@ -1532,7 +1522,7 @@ function renderBackupsList() {
     <div class="backup-row">
       <div class="backup-row-info">
         <div class="backup-row-name">${escapeHtml(b.fileName || "Backup")}</div>
-       <div class="backup-row-meta">${fmtDateTime(b.timestamp)}</div>
+        <div class="backup-row-meta">${fmtDateTime(b.timestamp)}</div>
       </div>
       <div class="backup-row-actions">
         <button class="btn btn-ghost btn-sm" data-open="${escapeHtml(b.fileId)}"><i data-lucide="external-link"></i>Open</button>
@@ -1575,11 +1565,6 @@ function initMasterDatabaseControls() {
     loadBackupsList();
   });
 
-  // The old single "Restore" button had no way to specify WHICH
-  // backup to restore, so it always sent an empty payload and the
-  // backend always rejected it with "Missing backupFileId." The
-  // button now just scrolls to / focuses the backup list instead of
-  // trying to restore blindly.
   const legacyRestoreBtn = document.getElementById("restoreBackupBtn");
   if (legacyRestoreBtn) {
     legacyRestoreBtn.textContent = "";
@@ -1591,7 +1576,7 @@ function initMasterDatabaseControls() {
 }
 
 // ============================================================
-// PROFILE / CHANGE PASSWORD
+// PROFILE / CHANGE PASSWORD (§19 — Drive-backed photo upload)
 // ============================================================
 function initProfile() {
   document.getElementById("profilePhotoUploadBtn").addEventListener("click", () => document.getElementById("profilePhotoUpload").click());
@@ -1601,8 +1586,14 @@ function initProfile() {
     const reader = new FileReader();
     reader.onload = async () => {
       document.getElementById("profilePhotoPreview").innerHTML = `<img src="${reader.result}" alt="Profile photo">`;
-      const res = await masterApi("saveProfile", { photoUrl: reader.result }, "POST");
-      toast(res.success ? "Photo saved" : "Failed to save photo", res.success ? "success" : "error");
+
+      const uploadRes = await masterApi("uploadImage", { base64: reader.result, filename: "profile_" + Date.now() + ".png", folderType: "profile" }, "POST");
+      if (uploadRes.success && uploadRes.url) {
+        const saveRes = await masterApi("saveProfile", { photoUrl: uploadRes.url }, "POST");
+        toast(saveRes.success ? "Photo saved" : (saveRes.error || "Failed to save photo"), saveRes.success ? "success" : "error");
+      } else {
+        toast(uploadRes.error || "Photo upload needs the backend 'uploadImage' action (Drive-backed) to persist — ask your developer to add it.", "warning", 6000);
+      }
     };
     reader.readAsDataURL(file);
   });
@@ -1637,7 +1628,7 @@ function initHeader() {
     toast("Refreshing...", "info", 1200);
     loadAllData();
   });
-document.getElementById("notifBtn").addEventListener("click", (e) => {
+  document.getElementById("notifBtn").addEventListener("click", (e) => {
     e.stopPropagation();
     const panel = document.getElementById("notifPanel");
     const wasHidden = panel.classList.contains("hidden");
