@@ -543,7 +543,8 @@ i[data-lucide] { width: 18px; height: 18px; display: inline-block; flex-shrink: 
 .application-card-head { display: flex; align-items: center; justify-content: space-between; }
 .application-card-name { font-weight: 700; font-size: 14.5px; }
 .application-card-meta { font-size: 12.5px; color: var(--text-dim); display: flex; flex-direction: column; gap: 3px; }
-.application-card-actions { display: flex; gap: 8px; margin-top: 6px; }
+.application-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.application-card-actions .btn { flex: 1 1 auto; min-width: 0; white-space: nowrap; }
 
 /* §5: small tag distinguishing the two merged application sources */
 .app-type-tag {
