@@ -26,6 +26,35 @@
 //        up yet — see note in initEmailSettings()/initProfile().
 // §20 — Reduced artificial stagger delay in the fallback loader path
 //        (250ms -> 80ms) — this was adding up to 2.5s of pure lag.
+//
+// §21 — FIX: applyBootstrapResult() was reading res.stats directly
+//        and handing it straight to renderStatCards(). Every other
+//        bootstrap field (events, applications, plans, dbInfo, ...)
+//        is a wrapper object like {success, stats:{...}} and the
+//        code correctly unwraps those (res.events.events etc), but
+//        stats was never unwrapped — so renderStatCards() received
+//        {success:true, stats:{...}} instead of the stats object
+//        itself, every key lookup came back undefined, and every
+//        card fell back to its "0" default. This is why the
+//        Dashboard counters always showed zero. Fixed below.
+// §22 — Session Timeout minutes: wired up an in-app "time spent /
+//        time left" readout (see renderRecentActivity /
+//        updateRecentActivitySessionMeta) since the Dashboard should
+//        only show login history + session timing, not the full
+//        generic audit feed.
+// §23 — Added withLoading() and wired it to every button that fires
+//        a backend call (Save buttons, Activate/Deactivate/Delete,
+//        Approve/Reject, Create/Download/Restore backup, Change
+//        Password, Send Test Email, Refresh) so there is always a
+//        visible loading state instead of the button silently doing
+//        nothing until the toast appears.
+// §24 — Email fields no longer rely on the browser's native
+//        type="email" validation (which silently blocks submission
+//        with no toast when a field like "Reply Email" doesn't look
+//        like an address — this is what caused the confusing
+//        "invalid email" issue). Inputs are now plain text with our
+//        own lightweight, forgiving validation that always explains
+//        itself via toast.
 // ============================================================
 
 const MASTER_CONFIG = {
@@ -63,6 +92,7 @@ const state = {
   sessionSecondsLeft: MASTER_CONFIG.SESSION_MINUTES * 60,
   sessionTimerHandle: null,
   bootstrapSupported: true,
+  sessionStartTime: null, // §22 — set on enterDashboard(), used for "time spent"
 };
 
 // ============================================================
@@ -217,10 +247,49 @@ function completeProgressBar(fillEl) {
   }, 500);
 }
 
+// ============================================================
+// §23 — GENERIC BUTTON LOADER
+// Wraps any async backend call so the triggering button visibly
+// shows a spinner and is disabled for the duration of the call,
+// instead of doing nothing until the toast appears. Safe to call
+// with btn = null/undefined (just runs fn()).
+// ============================================================
+function withLoading(btn, fn) {
+  if (!btn) return Promise.resolve(fn());
+  if (btn.dataset.loading === "1") return Promise.resolve(); // ignore double-clicks mid-flight
+  const original = btn.innerHTML;
+  const originalWidth = btn.offsetWidth;
+  btn.dataset.loading = "1";
+  btn.disabled = true;
+  btn.style.minWidth = originalWidth + "px";
+  btn.innerHTML = `<span class="mini-loader"></span>`;
+  return Promise.resolve()
+    .then(fn)
+    .finally(() => {
+      btn.dataset.loading = "0";
+      btn.disabled = false;
+      btn.style.minWidth = "";
+      btn.innerHTML = original;
+      if (window.lucide) lucide.createIcons();
+    });
+}
+
 function escapeHtml(str) {
   const d = document.createElement("div");
   d.textContent = str ?? "";
   return d.innerHTML;
+}
+
+// ============================================================
+// §24 — LIGHTWEIGHT EMAIL VALIDATION (replaces native type="email"
+// blocking). Forgiving on purpose — its only job is to catch obvious
+// mistakes (empty, no "@", no domain dot) and explain them via toast
+// instead of a silent native browser block.
+// ============================================================
+function isValidEmailLoose_(value) {
+  const v = String(value || "").trim();
+  if (!v) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 }
 
 // ============================================================
@@ -396,6 +465,7 @@ function enterDashboard() {
   document.getElementById("loginScreen").classList.add("hidden");
   document.getElementById("dashboardShell").classList.remove("hidden");
   if (window.lucide) lucide.createIcons();
+  state.sessionStartTime = Date.now(); // §22 — used for "Time spent" on Dashboard
   startSessionTimer();
   setBackendStatus("pending");
   loadAllData();
@@ -404,6 +474,7 @@ function enterDashboard() {
 function logoutMasterAdmin() {
   clearSession();
   stopSessionTimer();
+  state.sessionStartTime = null;
   document.getElementById("dashboardShell").classList.add("hidden");
   document.getElementById("loginScreen").classList.remove("hidden");
   document.getElementById("masterPassword").value = "";
@@ -445,6 +516,7 @@ function updateSessionTimerText() {
   const s = (state.sessionSecondsLeft % 60).toString().padStart(2, "0");
   const el = document.getElementById("sessionTimerText");
   if (el) el.textContent = `${m}:${s}`;
+  updateRecentActivitySessionMeta(); // §22 — keep Dashboard's "time left" live too
 }
 
 // ============================================================
@@ -482,7 +554,7 @@ async function loadAllData() {
 
     if (!looksUnsupported && res) {
       applyBootstrapResult(res);
-      const coreOk = !!(res.events && res.events.events) && !!res.stats;
+      const coreOk = !!(res.events && res.events.events) && !!(res.stats && res.stats.stats);
       setBackendStatus(coreOk ? "online" : "offline",
         coreOk ? null : "Some dashboard sections failed to load.");
       return;
@@ -498,7 +570,14 @@ async function loadAllData() {
 function applyBootstrapResult(res) {
   const errors = res.errors || {};
 
-  if (res.stats) renderStatCards(res.stats);
+  // §21 FIX: getPlatformStats_() (and therefore the bootstrap's
+  // "stats" key) returns {success, stats:{...}} — the *actual*
+  // numbers are one level deeper, at res.stats.stats. Every other
+  // bootstrap field below already unwraps its wrapper the same way
+  // (res.events.events, res.plans.plans, res.dbInfo.info, ...); stats
+  // was the one place that unwrap was missing, which is why every
+  // Dashboard counter always rendered as 0.
+  if (res.stats && res.stats.stats) renderStatCards(res.stats.stats);
   else renderSectionError("statGrid", errors.stats || "No stats returned", loadStats);
 
   if (res.events && res.events.events) {
@@ -681,6 +760,15 @@ function fmtDateTime(date, time) {
   return dPart;
 }
 
+// §22: mm:ss duration formatter, shared by the session timer and the
+// Dashboard's "Time spent / Time left" readout.
+function fmtDuration(totalSeconds) {
+  const s = Math.max(0, Math.floor(totalSeconds || 0));
+  const m = Math.floor(s / 60).toString().padStart(2, "0");
+  const sec = (s % 60).toString().padStart(2, "0");
+  return `${m}:${sec}`;
+}
+
 // ============================================================
 // EVENTS TABLE
 // ============================================================
@@ -714,7 +802,7 @@ function initEventsControls() {
   });
   document.getElementById("eventDetailsActions").addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-action]");
-    if (btn) handleEventDetailAction(btn.dataset.action);
+    if (btn) handleEventDetailAction(btn.dataset.action, btn);
   });
   document.getElementById("loadSpreadsheetPreviewBtn").addEventListener("click", loadSpreadsheetPreview);
 }
@@ -789,10 +877,10 @@ function renderEventsTable() {
         <div class="row-actions" onclick="event.stopPropagation()">
           <button class="icon-btn" title="View" onclick="openEventDetails('${escapeHtml(ev.eventId)}')"><i data-lucide="eye"></i></button>
           ${ev.status === "Active"
-            ? `<button class="icon-btn" title="Deactivate" onclick="deactivateEvent('${escapeHtml(ev.eventId)}')"><i data-lucide="power-off"></i></button>`
-            : `<button class="icon-btn" title="Activate" onclick="activateEvent('${escapeHtml(ev.eventId)}')"><i data-lucide="power"></i></button>`
+            ? `<button class="icon-btn" title="Deactivate" onclick="deactivateEvent('${escapeHtml(ev.eventId)}', this)"><i data-lucide="power-off"></i></button>`
+            : `<button class="icon-btn" title="Activate" onclick="activateEvent('${escapeHtml(ev.eventId)}', this)"><i data-lucide="power"></i></button>`
           }
-          <button class="icon-btn" title="Delete" onclick="deleteEvent('${escapeHtml(ev.eventId)}')"><i data-lucide="trash-2"></i></button>
+          <button class="icon-btn" title="Delete" onclick="deleteEvent('${escapeHtml(ev.eventId)}', this)"><i data-lucide="trash-2"></i></button>
         </div>
       </td>
     </tr>`).join("");
@@ -828,40 +916,46 @@ function downloadTextFile(filename, content) {
 }
 
 // ---------------- row actions ----------------
-async function activateEvent(eventId) {
+async function activateEvent(eventId, btn) {
   const ok = await confirmDialog({
     title: "Activate this event?",
     message: "Organizers and the public site regain access immediately.",
     confirmLabel: "Activate",
   });
   if (!ok) return;
-  const res = await masterApi("activateEvent", { eventId }, "POST");
-  toast(res.success ? "Event activated" : (res.error || "Failed"), res.success ? "success" : "error");
-  loadEvents();
+  await withLoading(btn, async () => {
+    const res = await masterApi("activateEvent", { eventId }, "POST");
+    toast(res.success ? "Event activated" : (res.error || "Failed"), res.success ? "success" : "error");
+    loadEvents();
+  });
 }
 
-async function deactivateEvent(eventId) {
+async function deactivateEvent(eventId, btn) {
   const ok = await confirmDialog({
     title: "Deactivate this event?",
     message: "Organizers lose access until reactivated.",
     confirmLabel: "Deactivate",
   });
   if (!ok) return;
-  const res = await masterApi("deactivateEvent", { eventId }, "POST");
-  toast(res.success ? "Event deactivated" : (res.error || "Failed"), res.success ? "success" : "error");
-  loadEvents();
+  await withLoading(btn, async () => {
+    const res = await masterApi("deactivateEvent", { eventId }, "POST");
+    toast(res.success ? "Event deactivated" : (res.error || "Failed"), res.success ? "success" : "error");
+    loadEvents();
+  });
 }
 
-async function deleteEvent(eventId) {
+async function deleteEvent(eventId, btn) {
   const ok = await confirmDialog({
     title: "Delete this event permanently?",
     message: "Removes it from the Master Database. Its spreadsheet and Drive folder are not affected.",
     confirmLabel: "Delete",
   });
   if (!ok) return;
-  const res = await masterApi("deleteEvent", { eventId }, "POST");
-  toast(res.success ? "Event deleted" : (res.error || "Failed"), res.success ? "success" : "error");
-  loadEvents();
+  await withLoading(btn, async () => {
+    const res = await masterApi("deleteEvent", { eventId }, "POST");
+    toast(res.success ? "Event deleted" : (res.error || "Failed"), res.success ? "success" : "error");
+    loadEvents();
+  });
 }
 
 // ============================================================
@@ -900,7 +994,7 @@ function closeEventDetails() {
   state.selectedEvent = null;
 }
 
-function handleEventDetailAction(action) {
+function handleEventDetailAction(action, btn) {
   const ev = state.selectedEvent;
   if (!ev) return;
   const openers = {
@@ -913,7 +1007,7 @@ function handleEventDetailAction(action) {
     openComplaintFolder: () => openUrl(ev.complaintFolderLink),
     openGalleryFolder: () => openUrl(ev.galleryFolderLink),
     openInvitationFolder: () => openUrl(ev.invitationFolderLink),
-    downloadBackup: () => downloadEventBackup(ev),
+    downloadBackup: () => withLoading(btn, () => downloadEventBackup(ev)),
   };
   (openers[action] || (() => {}))();
 }
@@ -1056,7 +1150,7 @@ function renderGlobalSettings() {
       return `
       <div class="setting-card glass">
         <div><div class="setting-title">${escapeHtml(title)}</div><div class="setting-desc">${escapeHtml(desc)}</div></div>
-        <input type="number" class="select" style="width:80px" data-setting="${key}" value="${values[key] ?? fallback}">
+        <input type="number" min="1" class="select" style="width:80px" data-setting="${key}" value="${values[key] ?? fallback}">
       </div>`;
     }
     const checked = values[key] ? "checked" : "";
@@ -1069,7 +1163,7 @@ function renderGlobalSettings() {
     <div class="sticky-save" style="grid-column:1/-1">
       <button class="btn btn-primary" id="saveGlobalSettingsBtn"><i data-lucide="save"></i>Save changes</button>
     </div>`;
-  document.getElementById("saveGlobalSettingsBtn").addEventListener("click", saveGlobalSettings);
+  document.getElementById("saveGlobalSettingsBtn").addEventListener("click", (e) => saveGlobalSettings(e.currentTarget));
   if (window.lucide) lucide.createIcons();
 }
 
@@ -1083,17 +1177,19 @@ function applySessionTimeoutSetting() {
   }
 }
 
-async function saveGlobalSettings() {
+async function saveGlobalSettings(btn) {
   const payload = {};
   document.querySelectorAll("#globalSettingsGrid [data-setting]").forEach((el) => {
     payload[el.dataset.setting] = el.type === "checkbox" ? el.checked : Number(el.value);
   });
-  const res = await masterApi("saveGlobalSettings", payload, "POST");
-  toast(res.success ? "Global settings saved" : (res.error || "Save failed"), res.success ? "success" : "error");
-  if (res.success) {
-    state.globalSettings = { ...state.globalSettings, ...payload };
-    applySessionTimeoutSetting();
-  }
+  await withLoading(btn, async () => {
+    const res = await masterApi("saveGlobalSettings", payload, "POST");
+    toast(res.success ? "Global settings saved" : (res.error || "Save failed"), res.success ? "success" : "error");
+    if (res.success) {
+      state.globalSettings = { ...state.globalSettings, ...payload };
+      applySessionTimeoutSetting();
+    }
+  });
 }
 
 // ============================================================
@@ -1136,22 +1232,25 @@ function renderPlans() {
       </ul>
       <button class="btn btn-secondary btn-sm save-plan-btn" data-plan="${p.id}"><i data-lucide="save"></i>Save</button>
     </div>`).join("");
-  grid.querySelectorAll(".save-plan-btn").forEach((btn) => btn.addEventListener("click", () => savePlan(btn.dataset.plan)));
+  grid.querySelectorAll(".save-plan-btn").forEach((btn) => btn.addEventListener("click", () => savePlan(btn.dataset.plan, btn)));
   if (window.lucide) lucide.createIcons();
 }
 
-async function savePlan(planId) {
+async function savePlan(planId, btn) {
   const input = document.querySelector(`.plan-price-input[data-plan="${planId}"]`);
   const price = Number(input.value);
-  const res = await masterApi("updatePlanPrice", { planId, price }, "POST");
-  toast(res.success ? `${planId} plan updated to ${fmtINR(price)}` : (res.error || "Failed"), res.success ? "success" : "error");
+  await withLoading(btn, async () => {
+    const res = await masterApi("updatePlanPrice", { planId, price }, "POST");
+    toast(res.success ? `${planId} plan updated to ${fmtINR(price)}` : (res.error || "Failed"), res.success ? "success" : "error");
+  });
 }
 
 // ============================================================
 // PAYMENT GATEWAY (§13 — now actually loads + saves)
 // ============================================================
 function initPaymentGateway() {
-  document.getElementById("savePaymentGatewayBtn").addEventListener("click", async () => {
+  document.getElementById("savePaymentGatewayBtn").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
     const payload = {
       enabled: document.getElementById("pgEnabled").checked,
       provider: document.getElementById("pgProvider").value,
@@ -1160,18 +1259,14 @@ function initPaymentGateway() {
       webhook: document.getElementById("pgWebhook").value,
       testMode: document.getElementById("pgTestMode").checked,
     };
-    const res = await masterApi("savePaymentGatewaySettings", payload, "POST");
-    toast(res.success ? "Payment gateway settings saved" : (res.error || "Failed — check the backend savePaymentGatewaySettings action"), res.success ? "success" : "error");
+    await withLoading(btn, async () => {
+      const res = await masterApi("savePaymentGatewaySettings", payload, "POST");
+      toast(res.success ? "Payment gateway settings saved" : (res.error || "Failed — check the backend savePaymentGatewaySettings action"), res.success ? "success" : "error");
+    });
   });
 }
 
 async function loadPaymentGateway() {
-  const view = document.getElementById("view-paymentGateway");
-  const card = view ? view.querySelector(".form-card") : null;
-  let fill = null;
-  if (card) {
-    card.dataset.prevContent = ""; // no-op placeholder, kept for symmetry with other loaders
-  }
   try {
     const res = await masterApi("getPaymentGatewaySettings");
     if (!res.success && !res.settings) {
@@ -1200,7 +1295,8 @@ function applyPaymentGatewaySettings(s) {
 }
 
 // ============================================================
-// EMAIL SETTINGS (§19 — logo upload attempts Drive-backed storage)
+// EMAIL SETTINGS (§19 — logo upload attempts Drive-backed storage,
+// §24 — soft email validation instead of native browser blocking)
 // ============================================================
 function initEmailSettings() {
   document.getElementById("esLogoUploadBtn").addEventListener("click", () => document.getElementById("esLogoUpload").click());
@@ -1227,14 +1323,38 @@ function initEmailSettings() {
     reader.readAsDataURL(file);
   });
 
-  document.getElementById("sendTestEmailBtn").addEventListener("click", async () => {
+  document.getElementById("sendTestEmailBtn").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
     const to = document.getElementById("esSupportEmail").value.trim() || document.getElementById("esOrgEmail").value.trim();
     if (!to) { toast("Enter a Support Email or Organization Email first", "warning"); return; }
-    const res = await masterApi("sendTestEmail", { to }, "POST");
-    toast(res.success ? `Test email sent to ${to}` : (res.error || "Failed"), res.success ? "success" : "error");
+    if (!isValidEmailLoose_(to)) { toast(`"${to}" doesn't look like a valid email address`, "warning"); return; }
+    await withLoading(btn, async () => {
+      const res = await masterApi("sendTestEmail", { to }, "POST");
+      toast(res.success ? `Test email sent to ${to}` : (res.error || "Failed"), res.success ? "success" : "error");
+    });
   });
 
-  document.getElementById("saveEmailSettingsBtn").addEventListener("click", async () => {
+  document.getElementById("saveEmailSettingsBtn").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+
+    // §24: soft validation with a clear toast, instead of the browser
+    // silently refusing to submit a type="email" field that doesn't
+    // look right (which is what produced the confusing "invalid
+    // email" behavior before).
+    const emailFields = [
+      ["esReplyEmail", "Reply Email"],
+      ["esSupportEmail", "Support Email"],
+      ["esOrgEmail", "Organization Email"],
+    ];
+    for (const [id, label] of emailFields) {
+      const val = document.getElementById(id).value.trim();
+      if (val && !isValidEmailLoose_(val)) {
+        toast(`"${label}" doesn't look like a valid email address (e.g. name@example.com)`, "warning", 5000);
+        document.getElementById(id).focus();
+        return;
+      }
+    }
+
     const payload = {
       senderName: document.getElementById("esSenderName").value,
       replyEmail: document.getElementById("esReplyEmail").value,
@@ -1246,8 +1366,10 @@ function initEmailSettings() {
       bccAdmin: document.getElementById("esBccAdmin").checked,
       logoUrl: window._currentLogoUrl || "",
     };
-    const res = await masterApi("saveEmailSettings", payload, "POST");
-    toast(res.success ? "Email settings saved" : (res.error || "Failed"), res.success ? "success" : "error");
+    await withLoading(btn, async () => {
+      const res = await masterApi("saveEmailSettings", payload, "POST");
+      toast(res.success ? "Email settings saved" : (res.error || "Failed"), res.success ? "success" : "error");
+    });
   });
 }
 
@@ -1366,25 +1488,29 @@ function renderApplications() {
         <span class="app-type-tag">${a.type === "subscriptionPayment" ? "Subscription payment" : "Event application"}</span>
       </div>
       <div class="application-card-actions">
-        <button class="btn btn-primary btn-sm" onclick="approveApplication('${escapeHtml(a.id)}','${escapeHtml(a.type || "eventApplication")}')"><i data-lucide="check"></i>Approve</button>
-        <button class="btn btn-danger btn-sm" onclick="rejectApplication('${escapeHtml(a.id)}','${escapeHtml(a.type || "eventApplication")}')"><i data-lucide="x"></i>Reject</button>
+        <button class="btn btn-primary btn-sm" onclick="approveApplication('${escapeHtml(a.id)}','${escapeHtml(a.type || "eventApplication")}', this)"><i data-lucide="check"></i>Approve</button>
+        <button class="btn btn-danger btn-sm" onclick="rejectApplication('${escapeHtml(a.id)}','${escapeHtml(a.type || "eventApplication")}', this)"><i data-lucide="x"></i>Reject</button>
         <button class="btn btn-ghost btn-sm" onclick="viewApplication('${escapeHtml(a.id)}')"><i data-lucide="eye"></i>View</button>
       </div>
     </div>`).join("");
   if (window.lucide) lucide.createIcons();
 }
 
-async function approveApplication(id, type) {
-  const res = await masterApi("approveApplication", { id, type }, "POST");
-  toast(res.success ? "Approved" : (res.error || "Failed"), res.success ? "success" : "error");
-  loadApplications();
+async function approveApplication(id, type, btn) {
+  await withLoading(btn, async () => {
+    const res = await masterApi("approveApplication", { id, type }, "POST");
+    toast(res.success ? "Approved" : (res.error || "Failed"), res.success ? "success" : "error");
+    loadApplications();
+  });
 }
-async function rejectApplication(id, type) {
+async function rejectApplication(id, type, btn) {
   const ok = await confirmDialog({ title: "Reject this application?", message: "The organizer will be notified.", confirmLabel: "Reject" });
   if (!ok) return;
-  const res = await masterApi("rejectApplication", { id, type }, "POST");
-  toast(res.success ? "Rejected" : (res.error || "Failed"), res.success ? "success" : "error");
-  loadApplications();
+  await withLoading(btn, async () => {
+    const res = await masterApi("rejectApplication", { id, type }, "POST");
+    toast(res.success ? "Rejected" : (res.error || "Failed"), res.success ? "success" : "error");
+    loadApplications();
+  });
 }
 function viewApplication(id) {
   const app = state.applications.find((a) => String(a.id) === String(id));
@@ -1392,7 +1518,7 @@ function viewApplication(id) {
 }
 
 // ============================================================
-// AUDIT TRAIL + RECENT ACTIVITY (§15, §18)
+// AUDIT TRAIL (§15, §18)
 // ============================================================
 async function loadAuditTrail() {
   const fill = showProgressBar("auditTimeline");
@@ -1416,25 +1542,58 @@ function initAuditControls() {
   document.getElementById("auditFilter").addEventListener("change", renderAuditTrail);
 }
 
-// §15: Dashboard "Recent Activity" card, fed from the same audit log.
+// ============================================================
+// §22 — DASHBOARD "RECENT ACTIVITY" — now scoped down to ONLY
+// login history + the current session's Time Spent / Time Left,
+// instead of the full generic audit feed (which belongs on the
+// dedicated Audit Trail page instead).
+// ============================================================
+function isLoginAuditRow_(r) {
+  return /login/i.test(String(r && r.action || ""));
+}
+
 function renderRecentActivity() {
   const el = document.getElementById("recentActivityList");
   if (!el) return;
-  const rows = (state.auditLog || []).slice(0, 6);
-  if (!rows.length) {
-    el.innerHTML = `<div class="empty-card"><i data-lucide="activity"></i><h3>Recent activity will appear here</h3><p>Once connected to the backend, the latest event creations, applications and payments will stream into this panel.</p></div>`;
-    if (window.lucide) lucide.createIcons();
-    return;
-  }
-  el.innerHTML = rows.map(r => `
-    <div class="timeline-item">
+
+  const sessionRow = `
+    <div class="timeline-item" id="recentActivitySessionRow">
       <div class="timeline-dot"></div>
       <div class="timeline-content">
-        <div class="timeline-action">${escapeHtml(r.action)}</div>
-        <div class="timeline-meta">${escapeHtml(r.user || "—")} &middot; ${fmtDateTime(r.date, r.time)}</div>
+        <div class="timeline-action">Current session</div>
+        <div class="timeline-meta" id="recentActivitySessionMeta">Time spent 00:00 &middot; Time left ${fmtDuration(state.sessionSecondsLeft)}</div>
       </div>
-    </div>`).join("");
+    </div>`;
+
+  const loginRows = (state.auditLog || []).filter(isLoginAuditRow_).slice(0, 6);
+
+  if (!loginRows.length) {
+    el.innerHTML = sessionRow + `
+      <div class="empty-card">
+        <i data-lucide="log-in"></i>
+        <h3>No previous logins recorded</h3>
+        <p>Master admin login history will appear here.</p>
+      </div>`;
+  } else {
+    el.innerHTML = sessionRow + loginRows.map((r) => `
+      <div class="timeline-item">
+        <div class="timeline-dot"></div>
+        <div class="timeline-content">
+          <div class="timeline-action">Login</div>
+          <div class="timeline-meta">${escapeHtml(r.user || "master")} &middot; ${fmtDateTime(r.date, r.time)}</div>
+        </div>
+      </div>`).join("");
+  }
+
   if (window.lucide) lucide.createIcons();
+  updateRecentActivitySessionMeta();
+}
+
+function updateRecentActivitySessionMeta() {
+  const el = document.getElementById("recentActivitySessionMeta");
+  if (!el) return;
+  const spentSec = state.sessionStartTime ? Math.floor((Date.now() - state.sessionStartTime) / 1000) : 0;
+  el.textContent = `Time spent ${fmtDuration(spentSec)} \u00b7 Time left ${fmtDuration(state.sessionSecondsLeft)}`;
 }
 
 function renderAuditTrail() {
@@ -1534,35 +1693,43 @@ function renderBackupsList() {
     btn.addEventListener("click", () => openUrl(sheetUrlFromId(btn.dataset.open)));
   });
   container.querySelectorAll("[data-restore]").forEach((btn) => {
-    btn.addEventListener("click", () => restoreSpecificBackup(btn.dataset.restore));
+    btn.addEventListener("click", () => restoreSpecificBackup(btn.dataset.restore, btn));
   });
   if (window.lucide) lucide.createIcons();
 }
 
-async function restoreSpecificBackup(backupFileId) {
+async function restoreSpecificBackup(backupFileId, btn) {
   const ok = await confirmDialog({
     title: "Restore this backup?",
     message: "This overwrites the live Master Database with this backup's contents.",
     confirmLabel: "Restore",
   });
   if (!ok) return;
-  const res = await masterApi("restoreMasterBackup", { backupFileId }, "POST");
-  toast(res.success ? "Master Database restored" : (res.error || "Restore failed"), res.success ? "success" : "error");
+  await withLoading(btn, async () => {
+    const res = await masterApi("restoreMasterBackup", { backupFileId }, "POST");
+    toast(res.success ? "Master Database restored" : (res.error || "Restore failed"), res.success ? "success" : "error");
+  });
 }
 
 function initMasterDatabaseControls() {
-  document.getElementById("createBackupBtn").addEventListener("click", async () => {
-    const res = await masterApi("createMasterBackup", {}, "POST");
-    toast(res.success ? "Backup created" : (res.error || "Backup failed"), res.success ? "success" : "error");
-    loadMasterDbInfo();
-    loadBackupsList();
+  document.getElementById("createBackupBtn").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    await withLoading(btn, async () => {
+      const res = await masterApi("createMasterBackup", {}, "POST");
+      toast(res.success ? "Backup created" : (res.error || "Backup failed"), res.success ? "success" : "error");
+      loadMasterDbInfo();
+      loadBackupsList();
+    });
   });
 
-  document.getElementById("downloadMasterBackupBtn").addEventListener("click", async () => {
-    const res = await masterApi("downloadMasterBackup");
-    if (res.success && res.url) window.open(res.url, "_blank");
-    else toast(res.error || "No backup found", "error");
-    loadBackupsList();
+  document.getElementById("downloadMasterBackupBtn").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    await withLoading(btn, async () => {
+      const res = await masterApi("downloadMasterBackup");
+      if (res.success && res.url) window.open(res.url, "_blank");
+      else toast(res.error || "No backup found", "error");
+      loadBackupsList();
+    });
   });
 
   const legacyRestoreBtn = document.getElementById("restoreBackupBtn");
@@ -1602,19 +1769,22 @@ function initProfile() {
   document.getElementById("profileLogoutBtn").addEventListener("click", logoutMasterAdmin);
 }
 
-document.getElementById("changePasswordBtn").addEventListener("click", async () => {
+document.getElementById("changePasswordBtn").addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
   const current = document.getElementById("pwCurrent").value;
   const next = document.getElementById("pwNew").value;
   const confirmVal = document.getElementById("pwConfirm").value;
   if (!current && current !== "") { toast("Fill in all password fields", "warning"); return; }
   if (next !== confirmVal) { toast("New passwords don't match", "error"); return; }
-  const res = await masterApi("changeMasterPassword", { current, next }, "POST");
-  toast(res.success ? "Password updated" : (res.error || "Failed"), res.success ? "success" : "error");
-  if (res.success) {
-    document.getElementById("pwCurrent").value = "";
-    document.getElementById("pwNew").value = "";
-    document.getElementById("pwConfirm").value = "";
-  }
+  await withLoading(btn, async () => {
+    const res = await masterApi("changeMasterPassword", { current, next }, "POST");
+    toast(res.success ? "Password updated" : (res.error || "Failed"), res.success ? "success" : "error");
+    if (res.success) {
+      document.getElementById("pwCurrent").value = "";
+      document.getElementById("pwNew").value = "";
+      document.getElementById("pwConfirm").value = "";
+    }
+  });
 });
 
 // ============================================================
@@ -1623,10 +1793,12 @@ document.getElementById("changePasswordBtn").addEventListener("click", async () 
 function initHeader() {
   document.getElementById("themeToggleBtn").addEventListener("click", toggleTheme);
   document.getElementById("logoutBtn").addEventListener("click", logoutMasterAdmin);
-  document.getElementById("refreshBtn").addEventListener("click", () => {
+  document.getElementById("refreshBtn").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
     setBackendStatus("pending");
-    toast("Refreshing...", "info", 1200);
-    loadAllData();
+    await withLoading(btn, async () => {
+      await loadAllData();
+    });
   });
   document.getElementById("notifBtn").addEventListener("click", (e) => {
     e.stopPropagation();
