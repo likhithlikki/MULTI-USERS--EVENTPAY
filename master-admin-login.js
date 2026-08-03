@@ -554,6 +554,7 @@ function applyBootstrapResult(res) {
   if (res.auditLog && res.auditLog.log) {
     state.auditLog = res.auditLog.log || [];
     renderAuditTrail();
+    renderRecentActivity();
   } else {
     renderSectionError("auditTimeline", errors.auditLog || "No audit log returned", loadAuditTrail);
   }
@@ -1362,8 +1363,9 @@ async function loadAuditTrail() {
       renderSectionError("auditTimeline", res.error || "Failed to load audit trail", loadAuditTrail);
       return;
     }
-    state.auditLog = res.log || [];
+state.auditLog = res.log || [];
     renderAuditTrail();
+    renderRecentActivity();
   } catch (e) {
     renderSectionError("auditTimeline", e.message || "Unexpected error", loadAuditTrail);
   }
@@ -1372,6 +1374,28 @@ function initAuditControls() {
   document.getElementById("auditSearch").addEventListener("input", debounce(renderAuditTrail, 200));
   document.getElementById("auditFilter").addEventListener("change", renderAuditTrail);
 }
+
+function renderRecentActivity() {
+  const el = document.getElementById("recentActivityList");
+  if (!el) return;
+  const rows = (state.auditLog || []).slice(0, 6);
+  if (!rows.length) {
+    el.innerHTML = `<div class="empty-card"><i data-lucide="activity"></i><h3>Recent activity will appear here</h3><p>Once connected to the backend, the latest event creations, applications and payments will stream into this panel.</p></div>`;
+    if (window.lucide) lucide.createIcons();
+    return;
+  }
+  el.innerHTML = rows.map(r => `
+    <div class="timeline-item">
+      <div class="timeline-dot"></div>
+      <div class="timeline-content">
+        <div class="timeline-action">${escapeHtml(r.action)}</div>
+        <div class="timeline-meta">${escapeHtml(r.user || "—")} &middot; ${fmtDateTime(r.date, r.time)}</div>
+      </div>
+    </div>`).join("");
+  if (window.lucide) lucide.createIcons();
+}
+
+
 function renderAuditTrail() {
   const q = (document.getElementById("auditSearch")?.value || "").trim().toLowerCase();
   const filter = document.getElementById("auditFilter")?.value || "";
