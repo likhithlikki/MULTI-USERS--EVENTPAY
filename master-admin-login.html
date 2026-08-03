@@ -73,7 +73,7 @@
       <p class="login-error hidden" id="loginError"></p>
     </form>
 
-    <div class="login-footer">EventPay &middot; Master Control Layer &middot; v4.1</div>
+    <div class="login-footer">EventPay &middot; Master Control Layer &middot; v4.2</div>
   </div>
 </div>
 
@@ -174,11 +174,14 @@
         </div>
 
        <div class="card glass" id="recentActivityCard">
+          <!-- §22: only login history + the current session's
+               Time spent / Time left now render here (see
+               renderRecentActivity() in the JS). -->
           <div id="recentActivityList">
             <div class="empty-card">
-              <i data-lucide="activity"></i>
-              <h3>Recent activity will appear here</h3>
-              <p>Once connected to the backend, the latest event creations, applications and payments will stream into this panel.</p>
+              <i data-lucide="log-in"></i>
+              <h3>No previous logins recorded</h3>
+              <p>Master admin login history will appear here.</p>
             </div>
           </div>
         </div>
@@ -422,9 +425,13 @@
               <span class="field-label">Sender Name</span>
               <input type="text" id="esSenderName" placeholder="EventPay">
             </label>
+            <!-- §24: these three were type="email" — an unrecognized
+                 format silently blocked the whole form with no
+                 explanation. Now plain text; the JS validates them
+                 itself and always explains via toast before saving. -->
             <label class="field">
               <span class="field-label">Reply Email</span>
-              <input type="email" id="esReplyEmail" placeholder="reply@eventpay.app">
+              <input type="text" id="esReplyEmail" placeholder="reply@eventpay.app" autocomplete="email">
             </label>
             <label class="field">
               <span class="field-label">Reply-To Name</span>
@@ -432,11 +439,11 @@
             </label>
             <label class="field">
               <span class="field-label">Support Email</span>
-              <input type="email" id="esSupportEmail" placeholder="support@eventpay.app">
+              <input type="text" id="esSupportEmail" placeholder="support@eventpay.app" autocomplete="email">
             </label>
             <label class="field">
               <span class="field-label">Organization Email</span>
-              <input type="email" id="esOrgEmail" placeholder="hello@eventpay.app">
+              <input type="text" id="esOrgEmail" placeholder="hello@eventpay.app" autocomplete="email">
             </label>
           </div>
 
@@ -520,7 +527,7 @@
           <select id="auditFilter" class="select">
             <option value="">All actions</option>
             <option value="Created Event">Created Event</option>
-            <option value="Login">Login</option>
+            <option value="Master Admin Login">Master Admin Login</option>
             <option value="Approved Application">Approved Application</option>
             <option value="Rejected Application">Rejected Application</option>
             <option value="Deactivated Event">Deactivated Event</option>
