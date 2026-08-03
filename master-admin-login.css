@@ -10,6 +10,18 @@
    §17 — .application-card-actions now wraps instead of overflowing.
    §12 — .loader / .loader-wrap pill progress bar, driven by the
          --fill CSS custom property (0–100) set from JS.
+   §23 — .mini-loader (small inline spinner used inside buttons by
+         withLoading() in the JS, for every backend-call button —
+         Save, Activate/Deactivate/Delete, Approve/Reject, Backup
+         Create/Download/Restore, Change Password, Refresh, ...).
+   §25 — FIX: native <select> dropdown popups were rendering with
+         near-white text on a near-white background in most
+         browsers, because <option> elements don't reliably inherit
+         CSS custom properties from the page's dark theme — the OS
+         renders the popup itself. Options are now given an explicit,
+         always-legible color/background so every dropdown (Sort,
+         Status, Plan, Application filter, Audit filter, Gateway
+         provider, ...) stays readable regardless of theme.
 ============================================================ */
 
 :root {
@@ -219,6 +231,7 @@ i[data-lucide] { width: 18px; height: 18px; display: inline-block; flex-shrink: 
   transition: transform .15s var(--ease), box-shadow .2s var(--ease), background .2s var(--ease), opacity .2s;
 }
 .btn:active { transform: scale(.97); }
+.btn:disabled { cursor: default; }
 .btn-block { width: 100%; }
 .btn-sm { padding: 8px 14px; font-size: 13px; border-radius: var(--radius-pill); }
 .btn-primary {
@@ -241,6 +254,32 @@ i[data-lucide] { width: 18px; height: 18px; display: inline-block; flex-shrink: 
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* §23: small inline pill loader shown INSIDE a button (via
+   withLoading() in JS) while its backend call is in flight — used
+   for every Save / Activate / Approve / Backup / etc. action so the
+   UI never looks like it silently did nothing. */
+.mini-loader {
+  display: inline-block;
+  width: 34px;
+  height: 12px;
+  border-radius: 20px;
+  color: currentColor;
+  border: 2px solid currentColor;
+  position: relative;
+  vertical-align: middle;
+}
+.mini-loader::before {
+  content: "";
+  position: absolute;
+  margin: 1px;
+  inset: 0 100% 0 0;
+  border-radius: inherit;
+  background: currentColor;
+  animation: miniLoaderFill 1.3s infinite;
+}
+@keyframes miniLoaderFill { 100% { inset: 0; } }
+.btn[data-loading="1"] { opacity: .85; cursor: default; pointer-events: none; }
+
 .icon-btn {
   width: 38px; height: 38px; border-radius: 50%;
   display: inline-flex; align-items: center; justify-content: center;
@@ -253,6 +292,8 @@ i[data-lucide] { width: 18px; height: 18px; display: inline-block; flex-shrink: 
   width: 7px; height: 7px; border-radius: 50%; background: var(--accent-2);
   box-shadow: 0 0 0 2px var(--bg);
 }
+.icon-btn[data-loading="1"] { opacity: .7; pointer-events: none; }
+.icon-btn .mini-loader { width: 20px; height: 10px; }
 
 /* ============================================================
    OVERLAYS / MODALS
@@ -415,6 +456,23 @@ i[data-lucide] { width: 18px; height: 18px; display: inline-block; flex-shrink: 
 .select {
   background: var(--input-bg); border: 1px solid var(--border); color: var(--text);
   border-radius: var(--radius-pill); padding: 9px 14px; font-size: 13px; outline: none;
+}
+
+/* §25 FIX: <option> elements render in a browser/OS-controlled
+   popup that does NOT reliably pick up --input-bg / --text (this is
+   why every dropdown — Sort, Status, Plan filter, etc. — showed
+   white text on a white background). Give options explicit,
+   always-legible colors regardless of the active theme. */
+select,
+.select {
+  color-scheme: light dark;
+}
+select option,
+.select option,
+select optgroup,
+.select optgroup {
+  color: #1c1830;
+  background-color: #ffffff;
 }
 
 /* ---------------- data table ---------------- */
