@@ -222,27 +222,48 @@ function toast(msg, type = "info", dur = 3500) {
 function showProgressBar(containerId) {
   const el = document.getElementById(containerId);
   if (!el) return null;
-  el.innerHTML = `<div class="progress-bar-track"><div class="progress-bar-fill" id="${containerId}-fill"></div></div>`;
+  el.innerHTML = `<div class="loader-wrap"><div class="loader" id="${containerId}-fill" style="--fill:0"></div></div>`;
   const fill = document.getElementById(`${containerId}-fill`);
   const steps = [[1000, 25], [2000, 59], [2000, 75], [2000, 90]];
   let elapsed = 0;
-  const timers = [];
   steps.forEach(([delay, pct]) => {
     elapsed += delay;
-    timers.push(setTimeout(() => { if (fill && fill.isConnected) fill.style.width = pct + "%"; }, elapsed));
+    setTimeout(() => { if (fill && fill.isConnected) fill.style.setProperty("--fill", pct); }, elapsed);
   });
   return fill;
 }
 function completeProgressBar(fillEl) {
   if (!fillEl || !fillEl.isConnected) return;
-  fillEl.style.transition = "width .3s ease";
-  fillEl.style.width = "100%";
+  fillEl.style.setProperty("--fill", 100);
   setTimeout(() => {
-    const track = fillEl.closest(".progress-bar-track");
-    if (track) track.remove();
-  }, 350);
+    const wrap = fillEl.closest(".loader-wrap");
+    if (wrap) wrap.remove();
+  }, 500);
 }
-
+function showProgressBar(containerId) {
+  const el = document.getElementById(containerId);
+  if (!el) return null;
+  el.innerHTML = `<div class="loader-wrap"><div class="loader" id="${containerId}-fill"></div></div>`;
+  const fill = document.getElementById(`${containerId}-fill`);
+  const steps = [[1000, 25], [2000, 59], [2000, 75], [2000, 90]];
+  let elapsed = 0;
+  steps.forEach(([delay, pct]) => {
+    elapsed += delay;
+    setTimeout(() => {
+      if (fill && fill.isConnected) fill.style.setProperty("--fill", pct);
+      if (fill && fill.isConnected) fill.style.inset = `0 ${100 - pct}% 0 0`;
+    }, elapsed);
+  });
+  return fill;
+}
+function completeProgressBar(fillEl) {
+  if (!fillEl || !fillEl.isConnected) return;
+  fillEl.style.inset = "0";
+  setTimeout(() => {
+    const wrap = fillEl.closest(".loader-wrap");
+    if (wrap) wrap.remove();
+  }, 400);
+}
 
 function escapeHtml(str) {
   const d = document.createElement("div");
