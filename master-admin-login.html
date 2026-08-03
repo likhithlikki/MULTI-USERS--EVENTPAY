@@ -111,7 +111,18 @@
     <div class="topbar-right">
       <button class="icon-btn" id="themeToggleBtn" title="Toggle theme"><i data-lucide="moon"></i></button>
       <button class="icon-btn" id="refreshBtn" title="Refresh"><i data-lucide="refresh-cw"></i></button>
-      <button class="icon-btn has-dot" id="notifBtn" title="Notifications"><i data-lucide="bell"></i></button>
+<div class="notif-wrap">
+        <button class="icon-btn has-dot" id="notifBtn" title="Notifications">
+          <i data-lucide="bell"></i>
+          <span class="notif-badge hidden" id="notifBadge">0</span>
+        </button>
+        <div class="notif-panel glass hidden" id="notifPanel">
+          <div class="notif-panel-head">Notifications</div>
+          <div class="notif-panel-body" id="notifPanelBody">
+            <div style="padding:14px;text-align:center;color:var(--text-faint,#94a3b8);">Loading…</div>
+          </div>
+        </div>
+      </div>
       <div class="session-timer" id="sessionTimer" title="Session time remaining">
         <i data-lucide="timer"></i><span id="sessionTimerText">60:00</span>
       </div>
@@ -401,7 +412,7 @@
         </div>
 
         <div class="card glass form-card">
-          <div class="form-grid">
+       <div class="form-grid">
             <label class="field">
               <span class="field-label">Sender Name</span>
               <input type="text" id="esSenderName" placeholder="EventPay">
@@ -411,6 +422,10 @@
               <input type="email" id="esReplyEmail" placeholder="reply@eventpay.app">
             </label>
             <label class="field">
+              <span class="field-label">Reply-To Name</span>
+              <input type="text" id="esReplyToName" placeholder="EventPay Support">
+            </label>
+            <label class="field">
               <span class="field-label">Support Email</span>
               <input type="email" id="esSupportEmail" placeholder="support@eventpay.app">
             </label>
@@ -418,6 +433,14 @@
               <span class="field-label">Organization Email</span>
               <input type="email" id="esOrgEmail" placeholder="hello@eventpay.app">
             </label>
+          </div>
+
+          <div class="setting-row">
+            <div>
+              <div class="setting-title">BCC Master Admin</div>
+              <div class="setting-desc">Send a hidden copy of test emails and organizer-facing emails to your Organization/Support Email above.</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="esBccAdmin"><span class="slider"></span></label>
           </div>
           <label class="field">
             <span class="field-label">Footer</span>
