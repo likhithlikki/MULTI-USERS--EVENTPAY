@@ -670,13 +670,15 @@ select optgroup,
    purely from JS without needing an infinite CSS keyframe.
 ============================================================ */
 .loader {
-  width: 120px;
-  height: 22px;
+  width: 260px;        /* was 120px */
+  height: 28px;         /* was 22px */
+  max-width: 90%;
   border-radius: 20px;
   color: var(--accent-2);
   border: 2px solid var(--accent);
   position: relative;
   margin: 0 auto;
+}
 }
 .loader::before {
   content: "";
